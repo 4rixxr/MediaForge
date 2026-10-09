@@ -1,0 +1,96 @@
+{
+  "name": "mediaforge",
+  "private": true,
+  "version": "1.6.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port=3000 --host=127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist server.js",
+    "lint": "tsc --noEmit",
+    "check": "npm run lint && npm run build",
+    "test": "node --import tsx tests/core-regressions.ts",
+    "start": "node server.js",
+    "dev:api": "node server.js",
+    "desktop": "electron .",
+    "package:win": "npm run build && electron-builder --win nsis --x64",
+    "package:win:portable": "npm run build && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "autoprefixer": "^10.4.21",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "main": "desktop/main.cjs",
+  "description": "Windows-first, local-only MediaForge desktop media toolkit",
+  "build": {
+    "appId": "studio.mediaforge.desktop",
+    "productName": "MediaForge Studio",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "server.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/win/bin",
+        "to": "bin",
+        "filter": [
+          "**/*.exe"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MediaForge-Studio-Setup-${version}-Windows-${arch}.${ext}"
+    },
+    "npmRebuild": false,
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MediaForge Studio",
+      "uninstallDisplayName": "MediaForge Studio",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "MediaForge-Studio-Setup-${version}-Windows-${arch}.${ext}"
+    }
+  }
+}
