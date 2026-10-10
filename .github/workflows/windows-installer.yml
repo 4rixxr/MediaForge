@@ -1,0 +1,54 @@
+name: Build Windows All-in-One Installer
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Bundle yt-dlp and FFmpeg into installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force 'vendor/win/bin' | Out-Null
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile 'vendor/win/bin/yt-dlp.exe'
+          Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile "$env:TEMP/ffmpeg.zip"
+          Expand-Archive "$env:TEMP/ffmpeg.zip" -DestinationPath "$env:TEMP/ffmpeg-unpacked" -Force
+          foreach ($name in @('ffmpeg.exe', 'ffprobe.exe')) {
+            $item = Get-ChildItem "$env:TEMP/ffmpeg-unpacked" -Recurse -File -Filter $name | Select-Object -First 1
+            if (-not $item) { throw "Missing $name from FFmpeg distribution" }
+            Copy-Item $item.FullName "vendor/win/bin/$name"
+          }
+          & 'vendor/win/bin/yt-dlp.exe' --version
+          & 'vendor/win/bin/ffmpeg.exe' -version
+          & 'vendor/win/bin/ffprobe.exe' -version
+      - name: Type check
+        run: npm run lint
+      - name: Regression tests
+        run: npm test
+      - name: Build setup EXE
+        run: npm run package:win
+      - name: Verify installer exists
+        shell: pwsh
+        run: |
+          $file = Get-ChildItem release -Filter 'MediaForge-Studio-Setup-*.exe' | Select-Object -First 1
+          if (-not $file -or $file.Length -lt 30000000) { throw 'Installer missing or suspiciously small' }
+          Get-FileHash $file.FullName -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MediaForge-Studio-Windows-Installer
+          path: release/MediaForge-Studio-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30

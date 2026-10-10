@@ -1,0 +1,46 @@
+name: Build Windows Portable EXE
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      # package-lock is updated by npm install because the desktop toolchain is new.
+      - name: Install application and packaging dependencies
+        run: npm install --no-audit --no-fund
+      - name: Download open-source command line tools into the bundle
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Force vendor/win/bin | Out-Null
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile 'vendor/win/bin/yt-dlp.exe'
+          Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile "$env:TEMP/ffmpeg.zip"
+          Expand-Archive "$env:TEMP/ffmpeg.zip" -DestinationPath "$env:TEMP/ffmpeg-unpack" -Force
+          foreach ($n in @('ffmpeg.exe','ffprobe.exe')) {
+            $src = Get-ChildItem "$env:TEMP/ffmpeg-unpack" -Recurse -Filter $n -File | Select-Object -First 1
+            if (!$src) { throw "Missing $n in FFmpeg archive" }
+            Copy-Item $src.FullName "vendor/win/bin/$n"
+          }
+          & 'vendor/win/bin/yt-dlp.exe' --version
+          & 'vendor/win/bin/ffmpeg.exe' -version
+          & 'vendor/win/bin/ffprobe.exe' -version
+      - name: Validate TypeScript
+        run: npm run lint
+      - name: Build Windows portable EXE
+        run: npm run package:win:portable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MediaForge-Studio-Windows-Portable
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 14
