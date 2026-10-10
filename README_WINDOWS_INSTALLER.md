@@ -1,3 +1,5 @@
+Untuk cara cepat, baca **MULAI_DI_SINI.md** dan jalankan **BUILD_INSTALLER_WINDOWS.cmd** pada Windows.
+
 # MediaForge Studio 1.6.0 — Windows Installer (All-in-One)
 
 ## Hasil akhir

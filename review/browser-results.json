@@ -1,0 +1,21 @@
+{
+  "browser": "153.0.8010.0",
+  "viewport": [
+    1440,
+    1000,
+    390,
+    844
+  ],
+  "checks": [
+    "No fabricated history",
+    "Category filter shows 6 image tools",
+    "Search empty state and keyboard selection",
+    "Real PNG to WebP UI conversion and download",
+    "Changing output options clears stale result",
+    "Browser encoders: png, jpeg, webp, ico, alpha",
+    "Theme toggle applies dark variant",
+    "Mobile navigation and settings without horizontal overflow",
+    "No uncaught browser errors"
+  ],
+  "errors": []
+}

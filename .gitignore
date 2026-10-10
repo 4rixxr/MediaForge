@@ -3,3 +3,5 @@ dist/
 release/
 vendor/win/bin/*.exe
 *.log
+
+.mediaforge-app/

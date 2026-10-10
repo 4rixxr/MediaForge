@@ -1,0 +1,44 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+@theme {
+ --font-sans:"Segoe UI",-apple-system,BlinkMacSystemFont,Arial,sans-serif;
+ --color-slate-50:#fafaf7; --color-slate-100:#f3f3ed; --color-slate-200:#e2e4dc; --color-slate-300:#c9cec3; --color-slate-400:#828e83; --color-slate-500:#657164; --color-slate-600:#505e51; --color-slate-700:#3c4b3f; --color-slate-800:#29372f; --color-slate-900:#1d2922; --color-slate-950:#141d18;
+ --color-indigo-50:#edf3ee; --color-indigo-100:#dfeae1; --color-indigo-200:#c8dacd; --color-indigo-300:#a7c6b0; --color-indigo-400:#8eb69b; --color-indigo-500:#567d62; --color-indigo-600:#345644; --color-indigo-700:#284735; --color-indigo-800:#223e2e; --color-indigo-900:#1c3226; --color-indigo-950:#17281e;
+ --radius-xl:0.5rem; --radius-2xl:0.625rem; --text-xs:0.8125rem; --text-xs--line-height:1.5;
+}
+:root { color-scheme:light; --studio-bg:#f5f4f0; --studio-surface:#fff; --studio-ink:#20251f; --studio-muted:#667062; --studio-border:#dedfd6; --studio-accent:#345644; }
+:root.dark { color-scheme:dark; --studio-bg:#141d18; --studio-surface:#1d2922; --studio-ink:#eef1e9; --studio-muted:#a4afa3; --studio-border:#354237; --studio-accent:#a7c6b0; }
+@layer base {
+ body { margin:0; background:var(--studio-bg);color:var(--studio-ink);font-family:var(--font-sans);-webkit-font-smoothing:antialiased; }
+ button:not(:disabled), summary { cursor:pointer; }
+ button,input,select,textarea { font:inherit; }
+ :focus-visible { outline:2px solid var(--studio-accent);outline-offset:4px; }
+ button:disabled { cursor:not-allowed;opacity:.55; }
+ input[type="range"] { accent-color:var(--studio-accent); }
+ code,pre,.font-mono { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+ ::selection { background:#d7e5d9;color:#20251f; }
+}
+.studio-app { background:var(--studio-bg);color:var(--studio-ink); }
+.studio-main { width:0; }
+.tool-workspace h2 { letter-spacing:-.025em; }
+.tool-workspace input:not([type="range"]):not([type="checkbox"]):not([type="file"]),.tool-workspace select { min-height:38px; }
+.tool-workspace [class*="shadow"] { box-shadow:none; }
+.tool-workspace [class*="bg-gradient"] { background-image:none; }
+.skip-link { position:fixed;left:12px;top:-80px;z-index:100;padding:12px 18px;background:var(--studio-surface);border:1px solid var(--studio-accent);border-radius:4px; }
+.skip-link:focus { top:10px; }
+.studio-panel { padding:24px;background:var(--studio-surface);border:1px solid var(--studio-border);border-radius:8px; }
+.studio-panel h3 { font-weight:600;font-size:15px;margin-bottom:8px; }
+.studio-panel p { color:var(--studio-muted);font-size:14px;line-height:1.6; }
+.studio-button { display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid var(--studio-border);background:var(--studio-surface);border-radius:5px;font-size:13px;font-weight:600; }
+.studio-button:hover { border-color:var(--studio-accent); }
+.studio-button[aria-pressed="true"] { background:var(--studio-accent);color:var(--studio-bg);border-color:var(--studio-accent); }
+.studio-dialog { margin:auto;width:min(480px,calc(100% - 32px));padding:28px;border:1px solid var(--studio-border);border-radius:10px;background:var(--studio-surface);color:var(--studio-ink); }
+.studio-dialog::backdrop { background:rgb(15 24 18 / .5); }
+.studio-dialog p { color:var(--studio-muted);font-size:14px;line-height:1.65;margin:14px 0; }
+.studio-notice { padding:12px 16px;border:1px solid var(--studio-border);border-radius:6px;font-size:13px;color:var(--studio-muted); }
+.studio-error { padding:12px 16px;border:1px solid #d7a8a0;border-radius:6px;background:#fff4f0;color:#943c2b;font-size:14px; }
+.dark .studio-error { background:#38231e;color:#f4c2b8; }
+::-webkit-scrollbar { width:6px;height:6px; }
+::-webkit-scrollbar-thumb { background:#a8afa5;border-radius:6px; }
+@media(max-width:639px) { .studio-panel { padding:18px; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important;transition:none!important;scroll-behavior:auto!important; } }

@@ -38,8 +38,13 @@ jobs:
         run: npm run lint
       - name: Regression tests
         run: npm test
-      - name: Build setup EXE
-        run: npm run package:win
+      - name: Build setup EXE from isolated runtime folder
+        shell: pwsh
+        run: |
+          npm run build
+          node scripts/stage-windows-app.cjs
+          $version = (Get-Content .electron-version -Raw).Trim()
+          npx electron-builder --projectDir .mediaforge-app --win nsis --x64 --config.electronVersion=$version
       - name: Verify installer exists
         shell: pwsh
         run: |

@@ -1,0 +1,11 @@
+import React, { useState } from 'react';
+import { Sun, Moon, Monitor, Trash2 } from 'lucide-react';
+import { useTheme } from '../../context/ThemeContext';
+import { useHistory } from '../../context/HistoryContext';
+export const SettingsView: React.FC = () => {
+ const {theme,setTheme}=useTheme(); const {history,clearHistory}=useHistory(); const [confirm,setConfirm]=useState(false);
+ return <div className="max-w-4xl mx-auto space-y-6 pb-12"><div><p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Workspace</p><h2 className="text-2xl font-semibold">Settings</h2><p className="mt-2 text-sm text-slate-500">Make this workspace feel right for you.</p></div>
+ <section className="studio-panel"><h3>Appearance</h3><p>Your preference is saved in this browser.</p><div className="flex flex-wrap gap-3 mt-5">{([{id:'light',label:'Light',icon:Sun},{id:'dark',label:'Dark',icon:Moon},{id:'system',label:'System',icon:Monitor}] as const).map(({id,label,icon:Icon})=><button key={id} className="studio-button" aria-pressed={theme===id} onClick={()=>setTheme(id)}><Icon size={16}/>{label}</button>)}</div></section>
+ <section className="studio-panel"><h3>Conversion history</h3><p>The last 50 completed conversions are saved here, including file names and sizes. Output files are not retained in history.</p><div className="flex flex-wrap items-center justify-between gap-4 mt-5"><span className="text-sm text-slate-500">{history.length} saved records</span><button className="studio-button" disabled={!history.length} onClick={()=>setConfirm(true)}><Trash2 size={15}/>Clear history</button></div>{confirm&&<div className="studio-notice mt-4"><p>Remove all saved conversion records? Downloaded files will remain on your device.</p><div className="flex gap-3 mt-3"><button className="studio-button" onClick={()=>setConfirm(false)}>Cancel</button><button className="studio-button" onClick={()=>{clearHistory();setConfirm(false);}}>Confirm clear</button></div></div>}</section>
+ <section className="studio-panel"><h3>Processing preferences</h3><p>Set format, quality, and dimensions inside each tool. Video and audio tools may download their processing engine on first use. Large files depend on your device’s available memory.</p></section></div>;
+};
