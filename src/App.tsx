@@ -8,6 +8,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { HistoryProvider } from './context/HistoryContext';
 import { QueueProvider } from './context/QueueContext';
 import { Header } from './components/layout/Header';
+import { UpdateNotice } from './components/layout/UpdateNotice';
 import { Sidebar } from './components/layout/Sidebar';
 import { ToolId } from './types/media';
 
@@ -145,6 +146,7 @@ function AppContent() {
         onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
       />
 
+      <UpdateNotice />
       <div className="flex flex-1 min-w-0">
         <Sidebar
           currentTool={currentTool}

@@ -26,8 +26,11 @@ if errorlevel 1 goto failed
 echo [4/4] Kemasi NSIS installer EXE...
 node "%~dp0scripts\stage-windows-app.cjs"
 if errorlevel 1 goto failed
-for /f %%V in (.electron-version) do set ELECTRON_VERSION=%%V
-call npx electron-builder --projectDir .mediaforge-app --win nsis --x64 --config.electronVersion=%ELECTRON_VERSION%
+pushd "%~dp0.mediaforge-app"
+call npm install --omit=dev --ignore-scripts --no-audit --no-fund
+popd
+if errorlevel 1 goto failed
+call npx electron-builder --win nsis --x64
 if errorlevel 1 goto failed
 echo.
 echo SUCCESS! Installer ada di folder release\

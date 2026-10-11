@@ -38,13 +38,15 @@ jobs:
         run: npm run lint
       - name: Regression tests
         run: npm test
-      - name: Build setup EXE from isolated runtime folder
+      - name: Stage runtime dependencies
         shell: pwsh
         run: |
-          npm run build
           node scripts/stage-windows-app.cjs
-          $version = (Get-Content .electron-version -Raw).Trim()
-          npx electron-builder --projectDir .mediaforge-app --win nsis --x64 --config.electronVersion=$version
+          Push-Location .mediaforge-app
+          npm install --omit=dev --ignore-scripts --no-audit --no-fund
+          Pop-Location
+      - name: Build setup EXE
+        run: npm run package:win
       - name: Verify installer exists
         shell: pwsh
         run: |
@@ -54,6 +56,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MediaForge-Studio-Windows-Installer
-          path: release/MediaForge-Studio-Setup-*.exe
+          path: |
+            release/MediaForge-Studio-Setup-*.exe
+            release/latest.yml
+            release/*.blockmap
           if-no-files-found: error
           retention-days: 30
