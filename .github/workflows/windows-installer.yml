@@ -17,7 +17,6 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
       - name: Bundle yt-dlp and FFmpeg into installer
         shell: pwsh
         run: |
