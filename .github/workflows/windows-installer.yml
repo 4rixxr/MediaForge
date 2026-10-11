@@ -17,6 +17,9 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
+        run: npm install --include=dev --no-audit --no-fund
+      - name: Verify electron-builder
+        run: npm exec --no -- electron-builder --version
       - name: Bundle yt-dlp and FFmpeg into installer
         shell: pwsh
         run: |
