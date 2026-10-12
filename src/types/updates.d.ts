@@ -1,5 +1,9 @@
 export {};
 declare global {
+  interface Window { mediaforgePreferences?: {
+    getLanguage():Promise<string|null>;
+    setLanguage(language:string):Promise<boolean>;
+  }; }
   interface Window { mediaforgeUpdates?: {
     version():Promise<string>;
     check():Promise<{ok:boolean;message?:string}>;

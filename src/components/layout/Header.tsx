@@ -1,3 +1,4 @@
+import { useLanguage } from '../../context/LanguageContext';
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, Sun, Moon, Laptop, Layers, Menu, X, Command, ArrowUpRight } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -14,6 +15,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ currentTool, onSelectTool, onToggleMobileSidebar, isMobileSidebarOpen }) => {
+  const {t}=useLanguage();
   const { theme, setTheme } = useTheme();
   const { jobs } = useQueue();
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,7 +42,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTool, onSelectTool, onTog
   };
 
   return (
-    <header className="mf-header">
+    <header className={`mf-header${['dashboard','file-converter','batch-converter'].includes(currentTool) ? ' is-converter' : ''}`}>
       <div className="mf-brand-area">
         <button type="button" className="mf-icon-button mf-menu-toggle" onClick={onToggleMobileSidebar} aria-label={isMobileSidebarOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={isMobileSidebarOpen} aria-controls="mf-navigation">
           {isMobileSidebarOpen ? <X size={19} /> : <Menu size={19} />}
@@ -50,7 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTool, onSelectTool, onTog
           <span>MediaForge<span className="mf-brand-period">.</span></span>
         </button>
       </div>
-      <span className="mf-breadcrumb">{currentName}</span>
+      {['dashboard','file-converter','batch-converter'].includes(currentTool) ? <div className="mf-converter-title"><h1>{t('Converter')}</h1><p>{t('Ubah audio, video, dan ekstrak audio dari video dalam satu tempat.')}</p></div> : <span className="mf-breadcrumb">{t(currentName)}</span>}
       <div className="mf-search" ref={searchRef}>
         <Search size={16} aria-hidden="true" />
         <input
@@ -62,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTool, onSelectTool, onTog
           aria-controls="mf-search-results"
           aria-activedescendant={isSearchOpen && filteredTools[activeResult] ? `mf-result-${filteredTools[activeResult].id}` : undefined}
           value={searchQuery}
-          placeholder="Find a tool or format…"
+          placeholder={t('Find a tool or format…')}
           onChange={(event) => { setSearchQuery(event.target.value); setActiveResult(0); setIsSearchOpen(true); }}
           onFocus={() => setIsSearchOpen(true)}
           onBlur={(event) => { if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node)) setIsSearchOpen(false); }}
@@ -88,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTool, onSelectTool, onTog
       </div>
       <div className="mf-header-actions">
         <button type="button" onClick={() => onSelectTool('batch-converter')} className="mf-queue-button" aria-label={`Open batch queue${activeJobsCount ? `, ${activeJobsCount} active jobs` : ''}`}>
-          <Layers size={16} /><span>Queue</span>{activeJobsCount > 0 && <b>{activeJobsCount}</b>}
+          <Layers size={16} /><span>{t('Queue')}</span>{activeJobsCount > 0 && <b>{activeJobsCount}</b>}
         </button>
         <div className="mf-theme-switch" role="group" aria-label="Color theme">
           {([{ value: 'light', label: 'Light theme', Icon: Sun }, { value: 'dark', label: 'Dark theme', Icon: Moon }, { value: 'system', label: 'System theme', Icon: Laptop }] as const).map(({ value, label, Icon }) => (

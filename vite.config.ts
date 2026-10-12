@@ -17,7 +17,17 @@ export default defineConfig(() => {
       exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
     },
     server: {
-      proxy: { "/api/url": "http://127.0.0.1:8787" },
+      proxy: { '/api/url': {
+        target: 'http://127.0.0.1:8787',
+        configure(proxy) {
+          proxy.on('proxyReq', (request, incoming) => {
+            // Normalize only our own dev origin; keep rejecting foreign origins.
+            if (incoming.headers.origin === 'http://127.0.0.1:3000') {
+              request.setHeader('Origin', 'http://127.0.0.1:8787');
+            }
+          });
+        },
+      } },
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin',
         'Cross-Origin-Embedder-Policy': 'credentialless',

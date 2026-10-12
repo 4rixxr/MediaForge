@@ -1,7 +1,20 @@
 const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
-const net = require('node:net');
 const path = require('node:path');
 const fs = require('node:fs');
+const languageCodes = new Set(['id','en','zh','th','ja']);
+ipcMain.handle('mediaforge:language:get', () => {
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'language.json'), 'utf8')).language;
+    return languageCodes.has(value) ? value : null;
+  } catch { return null; }
+});
+ipcMain.handle('mediaforge:language:set', (_event, language) => {
+  if (!languageCodes.has(language)) throw Error('Unsupported language');
+  const root = app.getPath('userData');
+  fs.mkdirSync(root, {recursive:true});
+  fs.writeFileSync(path.join(root, 'language.json'), JSON.stringify({language}), 'utf8');
+  return true;
+});
 
 let window;
 let updater;
@@ -11,7 +24,7 @@ function updateMessage(state, detail = {}) {
   if (window && !window.isDestroyed()) window.webContents.send('mediaforge:update', {state, ...detail});
 }
 function configureUpdates() {
-  if (!app.isPackaged || process.platform !== 'win32') return;
+  if (!app.isPackaged || process.platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_FILE) return;
   try {
     const {autoUpdater} = require('electron-updater');
     updater = autoUpdater;
@@ -47,16 +60,6 @@ ipcMain.handle('mediaforge:update:install', () => {
   setImmediate(() => updater.quitAndInstall(false, true));
   return {ok:true};
 });
-function availablePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
-}
 function bundledBin(name) {
   const root = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../vendor/win');
   return path.join(root, 'bin', name + '.exe');
@@ -69,26 +72,28 @@ async function start() {
   }
   for (const bin of ['yt-dlp', 'ffmpeg', 'ffprobe']) {
     if (!fs.existsSync(bundledBin(bin))) {
-      dialog.showErrorBox('Komponen belum lengkap', `${bin}.exe tidak ditemukan. Gunakan paket portable hasil GitHub Actions, bukan ZIP source code.`);
-      app.quit();
-      return;
+      throw Error(`${bin}.exe tidak ditemukan. Gunakan installer/portable hasil GitHub Actions, bukan ZIP source code.`);
     }
   }
-  const port = await availablePort();
-  process.env.MEDIAFORGE_PORT = String(port);
   process.env.MEDIAFORGE_HOST = '127.0.0.1';
   process.env.MEDIAFORGE_YTDLP = bundledBin('yt-dlp');
   process.env.MEDIAFORGE_FFMPEG = bundledBin('ffmpeg');
   process.env.MEDIAFORGE_FFPROBE = bundledBin('ffprobe');
-  await import('../server.js');
+  const {startServer} = await import('../server.js');
+  const server = await startServer({port:0, host:'127.0.0.1'});
+  const {port} = server.address();
+  app.once('before-quit', () => { server.close(); server.closeAllConnections(); });
   const url = `http://127.0.0.1:${port}`;
-  // Wait for the internal HTTP server; no manual localhost setup is required.
-  let ready = false;
-  for (let i = 0; i < 60; i++) {
-    try { const response = await fetch(url); if (response.ok) { ready = true; break; } } catch {}
-    await new Promise(resolve => setTimeout(resolve, 150));
+  if (process.argv.includes('--smoke-test')) {
+    const response = await fetch(url);
+    if (!response.ok || !(await response.text()).includes('id="root"')) {
+      throw Error('Packaged UI could not be served.');
+    }
+    require('electron-updater');
+    console.log('PASS: packaged Electron starts, loads backend/UI, and resolves updater.');
+    app.exit(0);
+    return;
   }
-  if (!ready) throw Error('Server internal MediaForge tidak berhasil dimulai.');
   window = new BrowserWindow({
     width: 1320, height: 880, minWidth: 880, minHeight: 630,
     show: false,
@@ -109,7 +114,8 @@ async function start() {
   setTimeout(() => { if (updater) updater.checkForUpdates().catch(err => updateMessage('error', {message:String(err.message || err)})); }, 2500);
 }
 app.whenReady().then(() => start().catch(error => {
-  dialog.showErrorBox('MediaForge Studio', String(error.message || error));
-  app.quit();
+  if (!process.argv.includes('--smoke-test')) dialog.showErrorBox('MediaForge Studio', String(error.message || error));
+  console.error(error);
+  app.exit(1);
 }));
 app.on('window-all-closed', () => app.quit());

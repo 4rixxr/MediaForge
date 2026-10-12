@@ -14,23 +14,16 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo [1/4] Install Electron Builder dan dependensi (hanya saat BUILD)...
-call npm install --no-audit --no-fund
+echo [1/3] Install locked dependencies...
+call npm ci --no-audit --no-fund
 if errorlevel 1 goto failed
-echo [2/4] Ambil binary Windows yt-dlp / FFmpeg...
+call npm run verify:electron
+if errorlevel 1 goto failed
+echo [2/3] Ambil binary Windows yt-dlp / FFmpeg...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\fetch-windows-tools.ps1"
 if errorlevel 1 goto failed
-echo [3/4] Compile website MediaForge...
-call npm run build
-if errorlevel 1 goto failed
-echo [4/4] Kemasi NSIS installer EXE...
-node "%~dp0scripts\stage-windows-app.cjs"
-if errorlevel 1 goto failed
-pushd "%~dp0.mediaforge-app"
-call npm install --omit=dev --ignore-scripts --no-audit --no-fund
-popd
-if errorlevel 1 goto failed
-call npx electron-builder --win nsis --x64
+echo [3/3] Build, stage, dan kemasi installer...
+call npm run package:win
 if errorlevel 1 goto failed
 echo.
 echo SUCCESS! Installer ada di folder release\

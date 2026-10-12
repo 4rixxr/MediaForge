@@ -1,4 +1,8 @@
 const {contextBridge, ipcRenderer} = require('electron');
+contextBridge.exposeInMainWorld('mediaforgePreferences', {
+  getLanguage: () => ipcRenderer.invoke('mediaforge:language:get'),
+  setLanguage: language => ipcRenderer.invoke('mediaforge:language:set', language),
+});
 contextBridge.exposeInMainWorld('mediaforgeUpdates', {
   version: () => ipcRenderer.invoke('mediaforge:update:version'),
   check: () => ipcRenderer.invoke('mediaforge:update:check'),

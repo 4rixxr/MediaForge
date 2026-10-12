@@ -2,8 +2,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 @theme {
  --font-sans:"Segoe UI",-apple-system,BlinkMacSystemFont,Arial,sans-serif;
- --color-slate-50:#fafaf7; --color-slate-100:#f3f3ed; --color-slate-200:#e2e4dc; --color-slate-300:#c9cec3; --color-slate-400:#828e83; --color-slate-500:#657164; --color-slate-600:#505e51; --color-slate-700:#3c4b3f; --color-slate-800:#29372f; --color-slate-900:#1d2922; --color-slate-950:#141d18;
- --color-indigo-50:#edf3ee; --color-indigo-100:#dfeae1; --color-indigo-200:#c8dacd; --color-indigo-300:#a7c6b0; --color-indigo-400:#8eb69b; --color-indigo-500:#567d62; --color-indigo-600:#345644; --color-indigo-700:#284735; --color-indigo-800:#223e2e; --color-indigo-900:#1c3226; --color-indigo-950:#17281e;
+ --color-slate-50:#faf9fc; --color-slate-100:#f4f2f8; --color-slate-200:#e8e5ef; --color-slate-300:#cec9da; --color-slate-400:#a49bb4; --color-slate-500:#847992; --color-slate-600:#6d617a; --color-slate-700:#51465f; --color-slate-800:#352c42; --color-slate-900:#211f32; --color-slate-950:#141322;
+ --color-indigo-50:#f6f2ff; --color-indigo-100:#eee6ff; --color-indigo-200:#dacaff; --color-indigo-300:#c3a9ff; --color-indigo-400:#ac8aff; --color-indigo-500:#9770fa; --color-indigo-600:#8057f4; --color-indigo-700:#6d45d7; --color-indigo-800:#5834b6; --color-indigo-900:#472e8b; --color-indigo-950:#2b1959;
  --radius-xl:0.5rem; --radius-2xl:0.625rem; --text-xs:0.8125rem; --text-xs--line-height:1.5;
 }
 :root { color-scheme:light; --studio-bg:#f5f4f0; --studio-surface:#fff; --studio-ink:#20251f; --studio-muted:#667062; --studio-border:#dedfd6; --studio-accent:#345644; }
@@ -16,7 +16,7 @@
  button:disabled { cursor:not-allowed;opacity:.55; }
  input[type="range"] { accent-color:var(--studio-accent); }
  code,pre,.font-mono { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
- ::selection { background:#d7e5d9;color:#20251f; }
+ ::selection { background:#e5daff;color:#32234f; }
 }
 .studio-app { background:var(--studio-bg);color:var(--studio-ink); }
 .studio-main { width:0; }

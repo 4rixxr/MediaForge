@@ -27,8 +27,11 @@ try {
     if (!(Test-Path $f) -or (Get-Item $f).Length -lt 100000) { throw "Invalid binary: $f" }
   }
   & $ytdlp --version
-  & $ffmpeg -version | Select-Object -First 1
-  & $ffprobe -version | Select-Object -First 1
+  if ($LASTEXITCODE -ne 0) { throw 'yt-dlp failed to start' }
+  & $ffmpeg -version
+  if ($LASTEXITCODE -ne 0) { throw 'FFmpeg failed to start' }
+  & $ffprobe -version
+  if ($LASTEXITCODE -ne 0) { throw 'FFprobe failed to start' }
   Write-Host 'Windows tools ready.'
 } finally {
   Remove-Item $tempDir -Force -Recurse -ErrorAction SilentlyContinue

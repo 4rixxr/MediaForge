@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import JSZip from 'jszip';
-import { QueueJob } from '../types/media';
+import { QueueJob, ConversionSettings } from '../types/media';
 import { useHistory } from './HistoryContext';
 
 interface QueueContextType {
   jobs: QueueJob[];
-  addJobs: (files: File[], defaultTargetFormat?: string) => void;
+  addJobs: (files: File[], defaultTargetFormat?: string, settings?: ConversionSettings) => void;
   updateJob: (id: string, updates: Partial<QueueJob>) => void;
   removeJob: (id: string) => void;
   clearAllJobs: () => void;
@@ -16,6 +16,8 @@ interface QueueContextType {
   downloadJobOutput: (id: string) => void;
   downloadAllCompletedAsZip: () => Promise<void>;
   isProcessingAny: boolean;
+  isQueuePaused: boolean;
+  pauseQueue: () => void;
 }
 
 const QueueContext = createContext<QueueContextType | undefined>(undefined);
@@ -26,6 +28,10 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const jobsRef = useRef<QueueJob[]>([]);
   const runningJobs = useRef(new Set<string>());
   const cancelledJobs = useRef(new Set<string>());
+  const runnerActive = useRef(false);
+  const paused = useRef(false);
+  const [isQueuePaused, setQueuePaused] = useState(false);
+  const pauseQueue = () => { paused.current = true; setQueuePaused(true); };
   const commitJobs = (updater: (previous: QueueJob[]) => QueueJob[]) => {
     jobsRef.current = updater(jobsRef.current);
     setJobs(jobsRef.current);
@@ -42,15 +48,16 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const isProcessingAny = jobs.some((j) => j.status === 'processing');
 
-  const addJobs = (files: File[], defaultTargetFormat?: string) => {
+  const addJobs = (files: File[], defaultTargetFormat?: string, settings?: ConversionSettings) => {
     const newJobs: QueueJob[] = files.map((file) => {
       let category: 'video' | 'audio' | 'image' | 'document' = 'image';
       let target = defaultTargetFormat || 'webp';
 
-      if (file.type.startsWith('video/')) {
+      const extension = file.name.split('.').pop()?.toLowerCase() || '';
+      if (file.type.startsWith('video/') || ['mp4','webm','mkv','mov','avi','m4v','ts'].includes(extension)) {
         category = 'video';
         target = defaultTargetFormat || 'mp4';
-      } else if (file.type.startsWith('audio/')) {
+      } else if (file.type.startsWith('audio/') || ['mp3','wav','aac','flac','m4a','ogg','opus','aiff'].includes(extension)) {
         category = 'audio';
         target = defaultTargetFormat || 'mp3';
       } else if (file.type.startsWith('image/')) {
@@ -72,6 +79,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         status: 'waiting',
         progress: 0,
         timestamp: Date.now(),
+        settings: settings ? {...settings} : undefined,
       };
     });
 
@@ -180,7 +188,19 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       let outputBlob: Blob;
       let outExt = job.targetFormat.toLowerCase();
 
-      if (job.category === 'image') {
+      const reportProgress = (progress: number) => {
+        if (!cancelledJobs.current.has(id)) updateJob(id, {progress});
+      };
+      if (job.settings?.mode === 'audio-video') {
+        const {ffmpegService} = await import('../services/ffmpegService');
+        outputBlob = await ffmpegService.audioToVideo(job.file, outExt, job.settings, reportProgress);
+      } else if (job.settings?.mode === 'video-audio') {
+        const res = await convertAudio(job.file, {
+          format: outExt as any, bitrate: job.settings.bitrate, channels: job.settings.channels,
+        }, reportProgress);
+        outputBlob = res.blob;
+        outExt = res.format;
+      } else if (job.category === 'image') {
         if (!['jpeg', 'jpg', 'png', 'webp', 'avif', 'bmp', 'ico'].includes(outExt)) throw new Error('Choose a supported image output format.');
         const fmt = (outExt === 'jpg' ? 'jpeg' : outExt) as any;
 
@@ -193,6 +213,8 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else if (job.category === 'audio') {
         const res = await convertAudio(job.file, {
           format: (outExt as any) || 'wav',
+          bitrate: job.settings?.bitrate,
+          channels: job.settings?.channels,
         }, (prog) => {
           if (!cancelledJobs.current.has(id)) updateJob(id, { progress: prog });
         });
@@ -201,6 +223,8 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else if (job.category === 'video') {
         const res = await processVideo(job.file, {
           format: (outExt as any) || 'mp4',
+          bitrate: job.settings?.videoBitrate,
+          fps: job.settings?.fps,
         }, (prog) => {
           if (!cancelledJobs.current.has(id)) updateJob(id, { progress: prog });
         });
@@ -230,7 +254,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         outputSize: outputBlob.size,
         inputFormat: ext.toUpperCase(),
         outputFormat: outExt.toUpperCase(),
-        category: job.category,
+        category: job.settings?.mode === 'video-audio' ? 'audio' : job.settings?.mode === 'audio-video' ? 'video' : job.category,
       });
     } catch (err: any) {
       if (cancelledJobs.current.has(id)) return;
@@ -246,10 +270,16 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const startAllWaitingJobs = async () => {
-    const waitingJobs = jobsRef.current.filter((j) => j.status === 'waiting');
-    for (const job of waitingJobs) {
-      if (jobsRef.current.find((item) => item.id === job.id)?.status === 'waiting') await startJob(job.id);
-    }
+    paused.current = false; setQueuePaused(false);
+    if (runnerActive.current) return;
+    runnerActive.current = true;
+    try {
+      while (!paused.current) {
+        const job = jobsRef.current.find(item => item.status === 'waiting' && !runningJobs.current.has(item.id));
+        if (!job) break;
+        await startJob(job.id);
+      }
+    } finally { runnerActive.current = false; }
   };
 
   return (
@@ -267,6 +297,8 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         downloadJobOutput,
         downloadAllCompletedAsZip,
         isProcessingAny,
+        isQueuePaused,
+        pauseQueue,
       }}
     >
       {children}

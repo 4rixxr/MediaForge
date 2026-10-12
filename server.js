@@ -61,18 +61,18 @@ function validateOption(data,metadata){
   if(metadata.duration && (a>=metadata.duration || (b>0&&b>metadata.duration+1)))throw Error('Waktu potong melebihi durasi.');
   return {a,b};
 }
-async function handle(req,res){
+async function handle(req,res,run=exec){
   const route=new URL(req.url||'/',`http://${HOST}:${PORT}`).pathname;
   if(req.method==='POST' && (route==='/api/url/info'||route==='/api/url/download')){
     const origin = req.headers.origin;
-    if (origin && origin !== `http://${HOST}:${PORT}`) return send(res,403,{error:'Permintaan dari origin lain ditolak.'});
+    if (origin && origin !== `http://${HOST}:${req.socket.localPort}`) return send(res,403,{error:'Permintaan dari origin lain ditolak.'});
     if (req.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') return send(res,415,{error:'Hanya permintaan JSON yang didukung.'});
     try{
       const input=await body(req);
       const p=platform(input.url);
       const restricted=drmError(p);
       if(restricted)return send(res,422,{error:restricted,platform:p,restricted:true});
-      const raw=await exec('yt-dlp',['--no-playlist','--no-warnings','--skip-download','--dump-single-json','--no-call-home','--',input.url],90000);
+      const raw=await run('yt-dlp',['--ignore-config','--no-playlist','--no-warnings','--skip-download','--dump-single-json','--no-call-home','--',input.url],90000);
       const meta=JSON.parse(raw);
       if(meta.is_live)throw Error('Live streaming belum didukung.');
       const info={title:meta.title||'Untitled',duration:meta.duration||0,thumbnail:meta.thumbnail||null,platform:p,formats:formatList(meta),originalWidth:meta.width||null,originalHeight:meta.height||null};
@@ -82,20 +82,23 @@ async function handle(req,res){
       const token=randomUUID();active.set(token,{temp,created:Date.now()});
       try{
         const output=path.join(temp,'download.%(ext)s');
-        const args=['--no-playlist','--no-warnings','--no-call-home','--no-part','-o',output];
+        const args=['--ignore-config','--no-playlist','--no-warnings','--no-call-home','--no-part','-o',output];
+        // yt-dlp does not understand MEDIAFORGE_FFMPEG. Pass its bundled path explicitly.
+        if (process.env.MEDIAFORGE_FFMPEG) args.push('--ffmpeg-location', path.dirname(binaries.ffmpeg));
         const isAudio=input.kind==='audio';
         if(isAudio){
-          if(input.format==='original')args.push('-f','bestaudio/best');
+          if(input.format==='original')args.push('-f','bestaudio/best','-x','--audio-format','best');
           else {args.push('-f','bestaudio/best','-x','--audio-format',input.format,'--audio-quality','0');}
         }else{
           const cap=input.resolution==='original'?'':`[height<=${input.resolution}]`;
-          args.push('-f',`bestvideo${cap}+bestaudio/best${cap}/best`,'--merge-output-format',input.format);
+          args.push('-f',`bestvideo${cap}+bestaudio/best${cap}`,'--merge-output-format',input.format);
           if(input.format==='mp4')args.push('--recode-video','mp4');
           if(input.format==='webm')args.push('--recode-video','webm');
+          if(input.format==='mkv')args.push('--remux-video','mkv');
         }
         if(a>0||b>0)args.push('--download-sections',`*${a||0}-${b||'inf'}`,'--force-keyframes-at-cuts');
         args.push('--',input.url);
-        await exec('yt-dlp',args);
+        await run('yt-dlp',args);
         const files=(await readdir(temp)).filter(n=>!n.endsWith('.part')&&!n.endsWith('.ytdl'));
         const candidate=files.find(n=>n.startsWith('download.'));
         if(!candidate)throw Error('Berkas tidak ditemukan setelah pengunduhan.');
@@ -105,11 +108,11 @@ async function handle(req,res){
         if(edited){
           const desired=input.ratio==='original'?null:input.ratio.split(':').map(Number);
           const vf=[];
-          if(desired){const [w,h]=desired;vf.push(`crop='min(iw,ih*${w}/${h})':'min(ih,iw*${h}/${w})'`);}
+          if(desired){const [w,h]=desired;vf.push(`crop='trunc(min(iw,ih*${w}/${h})/2)*2':'trunc(min(ih,iw*${h}/${w})/2)*2'`);}
           // Resolution is already capped during stream selection. Avoid needless re-encoding.
           const out=path.join(temp,`final.${input.format}`);
           const codec=input.format==='webm'?['-c:v','libvpx-vp9','-c:a','libopus']:['-c:v','libx264','-crf','18','-preset','medium','-c:a','aac','-b:a','192k'];
-          await exec('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',file,'-vf',vf.join(','),...codec,out]);
+          await run('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',file,'-vf',vf.join(','),...codec,out]);
           file=out;
         }
         const st=await stat(file);
@@ -117,7 +120,8 @@ async function handle(req,res){
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Length':st.size,'Content-Disposition':`attachment; filename="${safeFile(info.title).replace(/[^\x20-\x7e]/g,'_')} ${ext}"`.replace(' '+ext,ext),'Cache-Control':'no-store'});
         const stream=createReadStream(file);
         stream.on('error',()=>res.destroy());
-        stream.on('close',async()=>{active.delete(token);await rm(temp,{recursive:true,force:true});});
+        res.on('close',()=>stream.destroy());
+        stream.on('close',()=>{active.delete(token);rm(temp,{recursive:true,force:true}).catch(console.error);});
         stream.pipe(res);
       }catch(err){active.delete(token);await rm(temp,{recursive:true,force:true});throw err;}
     }catch(err){if(!res.headersSent)send(res,400,{error:err.message||'Gagal memproses URL.'});}
@@ -133,4 +137,18 @@ async function handle(req,res){
     if(req.method==='HEAD')res.end();else createReadStream(file).pipe(res);
   }catch{send(res,404,{error:'Build tidak ditemukan. Jalankan npm run build.'});}
 }
-http.createServer((req,res)=>{handle(req,res).catch(e=>{if(!res.headersSent)send(res,500,{error:e.message});});}).listen(PORT,HOST,()=>console.log(`MediaForge: http://${HOST}:${PORT}`));
+export function startServer({port=PORT, host=HOST, run=exec}={}) {
+  return new Promise((resolve, reject) => {
+    const server=http.createServer((req,res)=>{handle(req,res,run).catch(e=>{if(!res.headersSent)send(res,500,{error:e.message});else res.destroy();});});
+    server.once('error',reject);
+    server.listen(port,host,()=>{
+      server.removeListener('error',reject);
+      resolve(server);
+    });
+  });
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  startServer().then(server=>console.log(`MediaForge: http://${HOST}:${server.address().port}`)).catch(error=>{
+    console.error('Server MediaForge gagal dimulai:',error.message);process.exitCode=1;
+  });
+}

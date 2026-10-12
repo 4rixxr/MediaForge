@@ -3,6 +3,7 @@
  * @license Apache-2.0
  */
 
+import { LanguageProvider } from './context/LanguageContext';
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { HistoryProvider } from './context/HistoryContext';
@@ -119,11 +120,11 @@ function AppContent() {
       case 'pdf-tools':
         return <PdfTools onSelectTool={setCurrentTool} />;
       case 'file-converter':
-        return <FileConverter onSelectTool={setCurrentTool} />;
+        return <Dashboard onSelectTool={setCurrentTool} />;
 
       // Tools
       case 'batch-converter':
-        return <BatchConverter />;
+        return <Dashboard onSelectTool={setCurrentTool} />;
       case 'media-info':
         return <MediaInfo />;
       case 'history':
@@ -167,12 +168,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
+    <LanguageProvider><ThemeProvider>
       <HistoryProvider>
         <QueueProvider>
           <AppContent />
         </QueueProvider>
       </HistoryProvider>
-    </ThemeProvider>
+    </ThemeProvider></LanguageProvider>
   );
 }

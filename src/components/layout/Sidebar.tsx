@@ -1,3 +1,4 @@
+import { useLanguage } from '../../context/LanguageContext';
 import React, { useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, Video, Minimize2, Maximize2, Crop, Scissors, Film, ImageDown, FileAudio, Music, VolumeX, Sliders, Layers, Tv, Image, Shrink, Scaling, FileText, Grid2X2, FileImage, FileSpreadsheet, ArrowLeftRight, ListOrdered, Info, Clock, Settings, ChevronDown, ShieldCheck, Download, X } from 'lucide-react';
 import { ToolId } from '../../types/media';
@@ -32,6 +33,7 @@ const WORKSPACE: NavItem[] = [
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentTool, onSelectTool, isMobileOpen, onCloseMobile }) => {
+  const {t}=useLanguage();
   const sidebarRef = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState<string[]>([]);
   useEffect(() => {
@@ -60,30 +62,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTool, onSelectTool, isM
   }, [isMobileOpen, onCloseMobile]);
   const renderItem = (item: NavItem) => {
     const Icon = item.icon;
-    return <button type="button" key={item.id} onClick={() => { onSelectTool(item.id); onCloseMobile(); }} className={`mf-nav-item${currentTool === item.id ? ' is-active' : ''}`} aria-current={currentTool === item.id ? 'page' : undefined}><Icon size={16} strokeWidth={1.7} /><span>{item.label}</span>{currentTool === item.id && <span className="mf-active-dot" aria-hidden="true" />}</button>;
+    return <button type="button" key={item.id} onClick={() => { onSelectTool(item.id); onCloseMobile(); }} className={`mf-nav-item${currentTool === item.id ? ' is-active' : ''}`} aria-current={currentTool === item.id ? 'page' : undefined}><Icon size={16} strokeWidth={1.7} /><span>{t(item.label)}</span>{currentTool === item.id && <span className="mf-active-dot" aria-hidden="true" />}</button>;
   };
   return <>
     {isMobileOpen && <button type="button" className="mf-sidebar-backdrop" onClick={onCloseMobile} aria-label="Close navigation" />}
     <aside ref={sidebarRef} id="mf-navigation" role={isMobileOpen ? 'dialog' : undefined} aria-modal={isMobileOpen || undefined} className={`mf-sidebar${isMobileOpen ? ' is-open' : ''}`} aria-label="Workspace navigation">
       <div className="mf-mobile-nav-heading"><span>MediaForge.</span><button type="button" onClick={onCloseMobile} className="mf-icon-button" aria-label="Close navigation"><X size={20} /></button></div>
       <nav className="mf-sidebar-scroll">
-        <p className="mf-nav-caption">Workspace</p>
+        <p className="mf-nav-caption">{t('Workspace')}</p>
         <div className="mf-nav-section">{WORKSPACE.map(renderItem)}</div>
-        <p className="mf-nav-caption mf-tools-caption">Media tools</p>
+        <p className="mf-nav-caption mf-tools-caption">{t('Media tools')}</p>
         {CATEGORIES.map((category) => {
           const Icon = category.icon;
           const isExpanded = expanded.includes(category.title);
           const hasActive = category.items.some((item) => item.id === currentTool);
-          return <div className="mf-nav-category" key={category.title}>
-            <button type="button" className={`mf-category-toggle${hasActive ? ' has-active' : ''}`} aria-expanded={isExpanded} aria-controls={`mf-category-${category.title}`} onClick={() => setExpanded((value) => isExpanded ? value.filter((title) => title !== category.title) : [...value, category.title])}>
-              <Icon size={17} strokeWidth={1.7} /><span>{category.title}</span><small>{category.items.length}</small><ChevronDown size={14} className={isExpanded ? 'is-expanded' : ''} />
+          return <div className="mf-nav-category" key={t(category.title)}>
+            <button type="button" className={`mf-category-toggle${hasActive ? ' has-active' : ''}`} aria-expanded={isExpanded} aria-controls={`mf-category-${t(category.title)}`} onClick={() => setExpanded((value) => isExpanded ? value.filter((title) => title !== category.title) : [...value, category.title])}>
+              <Icon size={17} strokeWidth={1.7} /><span>{t(category.title)}</span><small>{category.items.length}</small><ChevronDown size={14} className={isExpanded ? 'is-expanded' : ''} />
             </button>
-            {isExpanded && <div className="mf-category-items" id={`mf-category-${category.title}`}>{category.items.map(renderItem)}</div>}
+            {isExpanded && <div className="mf-category-items" id={`mf-category-${t(category.title)}`}>{category.items.map(renderItem)}</div>}
           </div>;
         })}
         <div className="mf-nav-utilities">{renderItem({ id: 'media-info', label: 'Inspect a file', icon: Info })}{renderItem({ id: 'settings', label: 'Settings', icon: Settings })}</div>
       </nav>
-      <div className="mf-sidebar-footer"><ShieldCheck size={17} strokeWidth={1.6} /><div><strong>Files stay on your device</strong><p>Media processing in your browser.</p></div></div>
+      <div className="mf-sidebar-footer"><ShieldCheck size={17} strokeWidth={1.6} /><div><strong>{t('Files stay on your device')}</strong><p>{t('Media processing in your browser.')}</p></div></div>
     </aside>
   </>;
 };

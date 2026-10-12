@@ -1,14 +1,82 @@
 const {chromium}=require('playwright');
-const {spawn}=require('child_process');const fs=require('fs');const assert=require('assert');
-const root=require('path').resolve(__dirname,'..');
-(async()=>{const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','3001'],{cwd:root,stdio:'ignore'});let b;try{for(let i=0;i<30;i++){try{await fetch('http://127.0.0.1:3001');break}catch{await new Promise(r=>setTimeout(r,150))}}b=await chromium.launch({headless:true});const p=await b.newPage({viewport:{width:1440,height:1000}});const errors=[];const checks=[];p.on('pageerror',e=>errors.push(e.message));await p.goto('http://127.0.0.1:3001');await p.getByRole('heading',{name:'A little less file work.'}).waitFor();
-assert.equal(await p.evaluate(()=>JSON.parse(localStorage.getItem('mediaforge_history')).length),0);checks.push('No fabricated history');
-await p.getByRole('group',{name:'Filter tools by category'}).getByRole('button',{name:/^Image 6$/}).click();assert.equal(await p.locator('.mf-tool-grid > button').count(),6);checks.push('Category filter shows 6 image tools');await p.getByRole('button',{name:/^All tools/}).click();
-const search=p.getByRole('combobox');await search.fill('doesnotexist');assert(await p.getByText(/No tools found/).isVisible());await search.fill('Image Converter');await search.press('ArrowDown');await search.press('Enter');await p.getByRole('heading',{name:'Image Converter',exact:true}).waitFor();checks.push('Search empty state and keyboard selection');
-const png=await p.evaluate(()=>{const c=document.createElement('canvas');c.width=64;c.height=48;const ctx=c.getContext('2d');ctx.fillStyle='#345644';ctx.fillRect(0,0,32,48);return c.toDataURL().split(',')[1]});
-await p.locator('input[type=file]').setInputFiles({name:'sample.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});await p.getByRole('button',{name:'Convert Image Now'}).click();await p.getByRole('button',{name:'Download Image'}).waitFor();const [download]=await Promise.all([p.waitForEvent('download'),p.getByRole('button',{name:'Download Image'}).click()]);assert(download.suggestedFilename().endsWith('.webp'));checks.push('Real PNG to WebP UI conversion and download');await p.getByRole('button',{name:'PNG',exact:true}).click();await p.getByRole('button',{name:'Convert Image Now'}).waitFor();checks.push('Changing output options clears stale result');
-const encoder=await p.evaluate(async b64=>{const {convertImage,createIco}=await import('/src/services/imageProcessor.ts');const blob=await(await fetch('data:image/png;base64,'+b64)).blob();const results=[];for(const format of ['png','jpeg','webp']){const r=await convertImage(blob,{format,width:32,keepAspectRatio:true});if(r.width!==32||r.height!==24||r.blob.type!=='image/'+format)throw Error('Bad conversion '+format);results.push(format)}const ico=await createIco(blob,32);const v=new DataView(await ico.arrayBuffer());if(v.getUint16(2,true)!==1||v.getUint16(4,true)!==1)throw Error('Invalid ICO');const transparent=await convertImage(blob,{format:'png'});const bitmap=await createImageBitmap(transparent.blob);const c=document.createElement('canvas');c.width=64;c.height=48;const ctx=c.getContext('2d');ctx.drawImage(bitmap,0,0);if(ctx.getImageData(50,10,1,1).data[3]!==0)throw Error('Lost alpha');return results.concat('ico','alpha')},png);checks.push('Browser encoders: '+encoder.join(', '));
-await p.locator('.mf-brand').click();await p.getByRole('heading',{name:'A little less file work.'}).waitFor();await p.screenshot({path:root+'/review/desktop-release.png',fullPage:true});
-await p.getByRole('button',{name:/Dark theme/i}).click();await p.waitForTimeout(100);assert(await p.locator('html').evaluate(e=>e.classList.contains('dark')));await p.screenshot({path:root+'/review/dark-release.png',fullPage:true});checks.push('Theme toggle applies dark variant');await p.getByRole('button',{name:/Light theme/i}).click();
-await p.setViewportSize({width:390,height:844});await p.waitForTimeout(350);assert(!(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth)));await p.screenshot({path:root+'/review/mobile-release.png',fullPage:true});await p.getByRole('button',{name:/Open navigation/i}).click();await p.waitForTimeout(250);await p.getByRole('button',{name:'Settings',exact:true}).first().click();await p.getByRole('heading',{name:'Settings',exact:true}).waitFor();assert(!(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth)));checks.push('Mobile navigation and settings without horizontal overflow');await p.screenshot({path:root+'/review/mobile-settings-release.png',fullPage:true});
-assert.deepEqual(errors,[]);checks.push('No uncaught browser errors');fs.writeFileSync(root+'/review/browser-results.json',JSON.stringify({browser:await b.version(),viewport:[1440,1000,390,844],checks,errors},null,2));console.log(JSON.stringify({checks,errors}));}finally{await b?.close();server.kill();}})().catch(e=>{console.error(e);process.exit(1)});
+const {spawn}=require('node:child_process');
+const fs=require('node:fs');const path=require('node:path');const assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..');
+const output=process.env.MEDIAFORGE_REVIEW_OUTPUT || path.join(root,'review');
+const port=8790;
+(async()=>{
+  fs.mkdirSync(output,{recursive:true});
+  const server=spawn(process.execPath,['server.js'],{cwd:root,env:{...process.env,MEDIAFORGE_PORT:String(port)},stdio:'ignore'});
+  let browser;
+  try{
+    for(let n=0;n<40;n++){try{await fetch(`http://127.0.0.1:${port}`);break}catch{await new Promise(resolve=>setTimeout(resolve,100));}}
+    browser=await chromium.launch({headless:true,...(process.env.MEDIAFORGE_CHROMIUM?{executablePath:process.env.MEDIAFORGE_CHROMIUM}:{})});
+    const page=await browser.newPage({viewport:{width:1280,height:960},reducedMotion:'reduce'});
+    const errors=[],checks=[];
+    page.on('pageerror',e=>errors.push(e.message));
+    // Optional local copies of the SAME production WASM core; encoding remains real.
+    if(process.env.MEDIAFORGE_TEST_CORE)await page.route('https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/*',async route=>{
+      const file=path.basename(new URL(route.request().url()).pathname);
+      await route.fulfill({status:200,contentType:file.endsWith('.wasm')?'application/wasm':'text/javascript',headers:{'access-control-allow-origin':'*'},body:fs.readFileSync(path.join(process.env.MEDIAFORGE_TEST_CORE,file))});
+    });
+    await page.goto(`http://127.0.0.1:${port}`);
+    await page.getByRole('heading',{name:'Siapkan berkas'}).waitFor();
+    assert.equal(await page.locator('.cv-stat').count(),4);
+    assert.equal(await page.locator('.cv-modes button').count(),4);
+    await page.screenshot({path:path.join(output,'MediaForge_UI_Reference_Desktop.png'),fullPage:true});
+    checks.push('Reference layout: four stats, four modes, split workspace, queue, history.');
+    await page.getByRole('button',{name:'Contoh berkas',exact:true}).click();
+    await page.getByLabel('Format keluaran',{exact:true}).selectOption('wav');
+    await page.getByLabel('Kanal',{exact:true}).selectOption('1');
+    await page.getByRole('button',{name:'Konversi sekarang',exact:true}).click();
+    await page.locator('.cv-job .completed').waitFor();
+    const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('button',{name:'Unduh Contoh-audio.wav',exact:true}).click()]);
+    const wav=fs.readFileSync(await download.path());
+    assert.equal(wav.toString('ascii',0,4),'RIFF');assert.equal(wav.readUInt16LE(22),1);
+    assert.equal(await page.locator('.cv-history-panel tbody tr').count(),1);
+    checks.push('Actual WAV conversion/download: RIFF header and selected mono channel verified.');
+    await page.getByRole('group',{name:'Filter antrean'}).getByRole('button',{name:/Diproses/}).click();
+    await page.getByText('Tidak ada tugas pada filter ini').waitFor();
+    await page.getByRole('group',{name:'Filter antrean'}).getByRole('button',{name:/Semua/}).click();
+    await page.getByRole('button',{name:'Bersihkan selesai',exact:true}).click();
+    assert.equal(await page.locator('.cv-job').count(),0);
+    assert.equal(await page.locator('.cv-history-panel tbody tr').count(),1);
+    checks.push('Queue filter and cleanup work; completed history is retained.');
+    if(process.env.MEDIAFORGE_TEST_CORE){
+      for(const [mode,format] of [['Audio → Audio','mp3'],['Audio → Video','mp4'],['Video → Video','webm'],['Video → Audio','wav']]){
+        await page.getByRole('group',{name:'Mode konversi'}).getByRole('button',{name:new RegExp(mode)}).click();
+        await page.getByRole('button',{name:'Contoh berkas',exact:true}).click();
+        await page.getByText('1 berkas siap dikonversi',{exact:true}).waitFor();
+        await page.getByLabel('Format keluaran',{exact:true}).selectOption(format);
+        await page.getByRole('button',{name:'Konversi sekarang',exact:true}).click();
+        const job=page.locator('.cv-job').last();
+        await job.locator('.completed').waitFor({timeout:120000});
+        const [result]=await Promise.all([page.waitForEvent('download'),job.getByRole('button',{name:/^Unduh/}).click()]);
+        const bytes=fs.readFileSync(await result.path());assert.ok(bytes.length>100);
+        if(format==='mp4')assert.equal(bytes.toString('ascii',4,8),'ftyp');
+        if(format==='webm')assert.equal(bytes.subarray(0,4).toString('hex'),'1a45dfa3');
+        if(format==='mp3')assert.ok(bytes.toString('ascii',0,3)==='ID3'||bytes[0]===255);
+        if(format==='wav')assert.equal(bytes.toString('ascii',0,4),'RIFF');
+        checks.push('Real '+mode+' conversion and '+format.toUpperCase()+' output signature verified.');
+      }
+    }
+    await page.evaluate(()=>{document.activeElement?.blur();window.scrollTo(0,0)});
+    await page.screenshot({path:path.join(output,'MediaForge_UI_Reference_Results.png'),fullPage:true});
+    await page.getByRole('button',{name:'Dark theme',exact:true}).click();
+    await page.evaluate(()=>{document.activeElement?.blur();window.scrollTo(0,0)});
+    await page.screenshot({path:path.join(output,'MediaForge_UI_Reference_Dark.png'),fullPage:true});
+    await page.getByRole('button',{name:'Light theme',exact:true}).click();
+    await page.setViewportSize({width:390,height:844});
+    await page.evaluate(()=>{document.activeElement?.blur();window.scrollTo(0,0)});
+    await page.waitForTimeout(250);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.screenshot({path:path.join(output,'MediaForge_UI_Reference_Mobile.png'),fullPage:true});
+    await page.getByRole('button',{name:'Open navigation',exact:true}).click();
+    await page.getByRole('button',{name:'Pengaturan',exact:true}).click();
+    await page.getByRole('heading',{name:'Pengaturan',exact:true}).waitFor();
+    checks.push('Dark theme and mobile layout/navigation checked without horizontal overflow.');
+    assert.deepEqual(errors,[]);
+    fs.writeFileSync(path.join(output,'browser-results.json'),JSON.stringify({browser:await browser.version(),checks,errors},null,2));
+    console.log(JSON.stringify({checks,errors},null,2));
+  }finally{await browser?.close();server.kill();}
+})().catch(e=>{console.error(e);process.exitCode=1});

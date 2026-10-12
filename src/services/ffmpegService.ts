@@ -223,6 +223,30 @@ class FFmpegService {
     return this.serialize(() => this.runAudioConversion(file, targetFormat, options, onProgress));
   }
 
+  public audioToVideo(file: File, format: string, options: {videoBitrate?: number; fps?: number}, onProgress?: (percent:number)=>void): Promise<Blob> {
+    return this.serialize(async () => {
+      if (!['mp4','webm'].includes(format)) throw new Error('Pilih MP4 atau WebM untuk audio ke video.');
+      if (!(await this.load()) || !this.ffmpeg) throw new Error('Mesin video belum tersedia. Periksa koneksi lalu coba lagi.');
+      const input = `audio_${Date.now()}.${file.name.split('.').pop() || 'wav'}`;
+      const output = `video_${Date.now()}.${format}`;
+      const engine = this.ffmpeg;
+      const progress = ({progress}:{progress:number}) => onProgress?.(Math.min(99,Math.max(5,Math.round(progress*100))));
+      engine.on('progress',progress);
+      try {
+        await engine.writeFile(input,await fetchFile(file));
+        const codec = format === 'mp4' ? ['-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-c:a','aac'] : ['-c:v','libvpx','-deadline','realtime','-c:a','libopus'];
+        const code = await engine.exec(['-y','-f','lavfi','-i',`color=c=0x211a38:s=1280x720:r=${options.fps || 30}`,'-i',input,'-map','0:v:0','-map','1:a:0',...codec,'-b:v',String(options.videoBitrate || 2500000),'-b:a','192k','-shortest',output]);
+        if (code !== 0) throw new Error('Audio tidak dapat dibuat menjadi video. Periksa format sumber.');
+        const blob = new Blob([await engine.readFile(output) as any],{type:getMimeForFormat(format)});
+        onProgress?.(100);
+        return blob;
+      } finally {
+        engine.off('progress',progress);
+        await Promise.allSettled([engine.deleteFile(input),engine.deleteFile(output)]);
+      }
+    });
+  }
+
   private async runAudioConversion(
     file: File,
     targetFormat: string,

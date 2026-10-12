@@ -1,3 +1,7 @@
+> **UI 1.7.1:** ruang Converter kini mengikuti gambar referensi. Baca [UI_UPDATE_1.7.1.md](UI_UPDATE_1.7.1.md) untuk fitur dan hasil validasi.
+
+> **Perbaikan build Electron (11 Oktober 2026):** baca [DEBUGGING_DAN_CARA_BUILD.md](DEBUGGING_DAN_CARA_BUILD.md) untuk temuan, hasil tes, dan langkah GitHub terbaru.
+
 # MediaForge Studio v1.3.0 — Web gratis + backend lokal opsional
 
 **Deploy gratis GitHub Pages:** baca [`GITHUB_PAGES_GRATIS.md`](GITHUB_PAGES_GRATIS.md). Workflow `.github/workflows/deploy-pages.yml` tersedia; **belum dipublikasikan otomatis ke akun GitHub kamu**. Situs statis dapat diakses di HP maupun desktop. Peralatan pemrosesan file berbasis browser berjalan lokal bila browser mendukung formatnya.

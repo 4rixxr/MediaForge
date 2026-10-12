@@ -47,6 +47,15 @@ export interface ToolDef {
 
 export type JobStatus = 'waiting' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
+export type ConversionMode = 'audio-audio' | 'video-audio' | 'video-video' | 'audio-video';
+export interface ConversionSettings {
+  mode?: ConversionMode;
+  bitrate?: number;
+  channels?: 1 | 2;
+  videoBitrate?: number;
+  fps?: number;
+}
+
 export interface QueueJob {
   id: string;
   fileName: string;
@@ -62,7 +71,7 @@ export interface QueueJob {
   outputFileName?: string;
   outputSize?: number;
   errorMessage?: string;
-  settings?: Record<string, any>;
+  settings?: ConversionSettings;
   duration?: number;
   timestamp: number;
 }

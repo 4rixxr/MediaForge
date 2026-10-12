@@ -10,57 +10,61 @@ jobs:
   windows-installer:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
+      - name: Show source commit
+        run: git log -1 --format="%h %s"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-      - name: Install dependencies
-        run: npm install --include=dev --no-audit --no-fund
-      - name: Verify electron-builder
-        run: npm exec --no -- electron-builder --version
-      - name: Bundle yt-dlp and FFmpeg into installer
+      - name: Install locked dependencies including Electron
+        run: npm ci --no-audit --no-fund
+      - name: Verify Electron binary
+        run: npm run verify:electron
+      - name: Bundle yt-dlp and FFmpeg
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force 'vendor/win/bin' | Out-Null
-          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile 'vendor/win/bin/yt-dlp.exe'
-          Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile "$env:TEMP/ffmpeg.zip"
-          Expand-Archive "$env:TEMP/ffmpeg.zip" -DestinationPath "$env:TEMP/ffmpeg-unpacked" -Force
-          foreach ($name in @('ffmpeg.exe', 'ffprobe.exe')) {
-            $item = Get-ChildItem "$env:TEMP/ffmpeg-unpacked" -Recurse -File -Filter $name | Select-Object -First 1
-            if (-not $item) { throw "Missing $name from FFmpeg distribution" }
-            Copy-Item $item.FullName "vendor/win/bin/$name"
-          }
-          & 'vendor/win/bin/yt-dlp.exe' --version
-          & 'vendor/win/bin/ffmpeg.exe' -version
-          & 'vendor/win/bin/ffprobe.exe' -version
+        run: ./scripts/fetch-windows-tools.ps1
       - name: Type check
         run: npm run lint
       - name: Regression tests
         run: npm test
-      - name: Stage runtime dependencies
-        shell: pwsh
-        run: |
-          node scripts/stage-windows-app.cjs
-          Push-Location .mediaforge-app
-          npm install --omit=dev --ignore-scripts --no-audit --no-fund
-          Pop-Location
-      - name: Build setup EXE
+      # The package script builds dist, stages the app, installs locked runtime
+      # dependencies, verifies staging, and only then invokes electron-builder.
+      - name: Build Setup EXE
         run: npm run package:win
-      - name: Verify installer exists
+      - name: Verify EXE and packaged runtime
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $file = Get-ChildItem release -Filter 'MediaForge-Studio-Setup-*.exe' | Select-Object -First 1
-          if (-not $file -or $file.Length -lt 30000000) { throw 'Installer missing or suspiciously small' }
+          if (-not $file -or $file.Length -lt 30000000) { throw 'EXE missing or suspiciously small' }
+          foreach ($name in @('yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe')) {
+            if (-not (Test-Path "release/win-unpacked/resources/bin/$name")) { throw "Missing bundled $name" }
+          }
+          node scripts/verify-packaged.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-FileHash $file.FullName -Algorithm SHA256 | Format-List
+      - name: Smoke test packaged Electron app
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: MediaForge-Studio-Windows-Installer
+          name: MediaForge-Studio-Windows-Setup
           path: |
             release/MediaForge-Studio-Setup-*.exe
             release/latest.yml
             release/*.blockmap
           if-no-files-found: error
           retention-days: 30
+      - name: Upload builder diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaForge-Setup-Build-Diagnostics
+          path: |
+            release/builder-debug.yml
+            release/builder-effective-config.yaml
+          if-no-files-found: ignore

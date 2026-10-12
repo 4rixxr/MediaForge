@@ -144,6 +144,17 @@ export async function convertAudio(
     const result = await convertAudio(new File([pcm], 'processed.wav', { type: 'audio/wav' }), { ...options, normalize: false, volume: 1 }, onProgress);
     return { ...result, originalSize: file.size };
   }
+  // PCM WAV can be encoded locally without downloading a WebAssembly engine.
+  if (options.format === 'wav') {
+    try {
+      const decoded = await decodeAudioFile(file);
+      const blob = audioBufferToWav(decoded, options.sampleRate, options.channels, options.volume ?? 1);
+      onProgress?.(100);
+      return {blob, duration:decoded.duration, originalSize:file.size, newSize:blob.size, format:'wav'};
+    } catch {
+      // Containers unsupported by Web Audio may still be readable by FFmpeg.
+    }
+  }
   // If file is a File object, attempt FFmpeg.wasm first
   if (file instanceof File) {
     try {
