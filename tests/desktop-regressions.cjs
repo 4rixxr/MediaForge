@@ -48,3 +48,29 @@ test('staging includes current output and only production dependency lock record
   assert.ok(!lock.packages['node_modules/vite']);
   assert.equal(fs.readFileSync(path.join(app,'dist/index.html'),'utf8'),'current dist/index.html');
 });
+
+test('packaged verification uses Windows separators and still rejects missing updater', () => {
+  const vm = require('node:vm');
+  const {createRequire} = require('node:module');
+  const asarFs = require.resolve('@electron/asar/lib/filesystem.js');
+  const localRequire = createRequire(asarFs);
+  const exports = {};
+  // Execute the installed ASAR traversal implementation with actual win32 path semantics.
+  vm.runInNewContext(fs.readFileSync(asarFs,'utf8'), {
+    exports, require: name => name === 'path' ? path.win32 : localRequire(name), Buffer, process,
+  }, {filename:asarFs});
+  const archiveFs = new exports.Filesystem('C:\\app');
+  const names = ['dist/index.html','server.js','desktop/main.cjs','desktop/preload.cjs','node_modules/electron-updater/package.json'];
+  const header = {files:{}};
+  for(const name of names){let node=header;const parts=name.split('/');for(const part of parts.slice(0,-1))node=node.files[part] ||= {files:{}};node.files[parts.at(-1)]={size:1,offset:'0'};}
+  archiveFs.setHeader(header,0);
+  assert.throws(()=>archiveFs.getFile(names.at(-1)),/not found/); // Original bug.
+  const source=fs.readFileSync(path.join(root,'scripts/verify-packaged.cjs'),'utf8');
+  const runVerifier=()=>vm.runInNewContext(source,{
+    __dirname:'C:\\project\\scripts', console:{log(){}},
+    require: name=>name==='node:path'?path.win32:{extractFile:(_archive,name)=>Buffer.alloc(archiveFs.getFile(name).size)},
+  });
+  runVerifier();
+  delete header.files.node_modules.files['electron-updater'].files['package.json'];
+  assert.throws(runVerifier,/not found/);
+});
