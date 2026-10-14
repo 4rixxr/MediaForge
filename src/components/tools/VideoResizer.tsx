@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Maximize2, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { processVideo, loadVideoElement } from '../../services/videoProcessor';
@@ -6,7 +7,7 @@ import { processVideo, loadVideoElement } from '../../services/videoProcessor';
 export const VideoResizer: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [videoMeta, setVideoMeta] = useState<{ width: number; height: number; duration: number } | null>(null);
-  const [preset, setPreset] = useState<string>('1080p');
+  const [preset, setPreset] = useState<string>('original');
   const [customWidth, setCustomWidth] = useState(1920);
   const [customHeight, setCustomHeight] = useState(1080);
   const [keepAspect, setKeepAspect] = useState(true);
@@ -14,6 +15,8 @@ export const VideoResizer: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [resultBlob, setResultBlob] = useState<Blob | null>(null);
+
+  useEffect(()=>{setResultBlob(null);},[file,preset,customWidth,customHeight,keepAspect,aspectPreset]);
 
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
@@ -23,12 +26,12 @@ export const VideoResizer: React.FC = () => {
 
     const { video, cleanup } = await loadVideoElement(f);
     setVideoMeta({
-      width: video.videoWidth || 1280,
-      height: video.videoHeight || 720,
+      width: video.videoWidth,
+      height: video.videoHeight,
       duration: video.duration || 0,
     });
-    setCustomWidth(video.videoWidth || 1280);
-    setCustomHeight(video.videoHeight || 720);
+    setCustomWidth(video.videoWidth);
+    setCustomHeight(video.videoHeight);
     cleanup();
   };
 
@@ -36,28 +39,11 @@ export const VideoResizer: React.FC = () => {
     setPreset(p);
     if (!videoMeta) return;
 
-    if (p === '4k') {
-      setCustomWidth(3840);
-      setCustomHeight(2160);
-    } else if (p === '1440p') {
-      setCustomWidth(2560);
-      setCustomHeight(1440);
-    } else if (p === '1080p') {
-      setCustomWidth(1920);
-      setCustomHeight(1080);
-    } else if (p === '720p') {
-      setCustomWidth(1280);
-      setCustomHeight(720);
-    } else if (p === '480p') {
-      setCustomWidth(854);
-      setCustomHeight(480);
-    } else if (p === '360p') {
-      setCustomWidth(640);
-      setCustomHeight(360);
-    } else if (p === 'original') {
-      setCustomWidth(videoMeta.width);
-      setCustomHeight(videoMeta.height);
-    }
+    const sizes:Record<string,[number,number]>={'4k':[3840,2160],'1440p':[2560,1440],'1080p':[1920,1080],'720p':[1280,720],'480p':[854,480],'360p':[640,360],original:[videoMeta.width,videoMeta.height]};
+    const box=sizes[p];if(!box)return;
+    const scale=keepAspect?Math.min(box[0]/videoMeta.width,box[1]/videoMeta.height):1;
+    setCustomWidth(keepAspect?Math.max(2,Math.round(videoMeta.width*scale/2)*2):box[0]);
+    setCustomHeight(keepAspect?Math.max(2,Math.round(videoMeta.height*scale/2)*2):box[1]);
   };
 
   const runResize = async () => {
@@ -78,7 +64,7 @@ export const VideoResizer: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -86,15 +72,17 @@ export const VideoResizer: React.FC = () => {
   const downloadVideo = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_${customWidth}x${customHeight}.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
           <Maximize2 size={20} />
@@ -102,7 +90,7 @@ export const VideoResizer: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Video Resizer</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Scale video resolution and aspect ratios with hardware-accelerated canvas smoothing.
+            Resize video with FFmpeg. Presets fit the original aspect ratio when enabled; encoded dimensions use even pixels.
           </p>
         </div>
       </div>
@@ -193,7 +181,7 @@ export const VideoResizer: React.FC = () => {
             <input
               type="checkbox"
               checked={keepAspect}
-              onChange={(e) => setKeepAspect(e.target.checked)}
+              onChange={(e) => {setKeepAspect(e.target.checked);setPreset('custom');if(e.target.checked&&videoMeta)setCustomHeight(Math.max(2,Math.round(customWidth*videoMeta.height/videoMeta.width/2)*2));}}
               className="rounded text-indigo-600"
             />
             <span>Maintain original aspect ratio</span>
@@ -236,6 +224,6 @@ export const VideoResizer: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

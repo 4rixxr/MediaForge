@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Minimize2, Download, RotateCw, CheckCircle2, Sliders, AlertCircle } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { processVideo, loadVideoElement } from '../../services/videoProcessor';
@@ -31,7 +32,7 @@ export const VideoCompressor: React.FC = () => {
       });
       cleanup();
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
     }
   };
 
@@ -46,29 +47,20 @@ export const VideoCompressor: React.FC = () => {
     }
   };
 
-  const getEstimatedReduction = () => {
-    switch (preset) {
-      case 'max': return 25;
-      case 'high': return 50;
-      case 'balanced': return 68;
-      case 'small': return 82;
-      case 'custom': return 60;
-    }
-  };
-
-  const originalSizeMb = file ? file.size / (1024 * 1024) : 0;
-  const reductionPercent = getEstimatedReduction();
-  const estimatedSizeMb = Math.max(0.5, originalSizeMb * (1 - reductionPercent / 100));
+  const originalSizeMb=file?file.size/1048576:0;
+  const estimatedSizeMb=(videoMeta?.duration||0)*(getPresetBitrate()+128)*1000/8/1048576;
+  const reductionPercent=resultBlob&&file?Math.round((1-resultBlob.size/file.size)*100):null;
+  useEffect(()=>setResultBlob(null),[file,preset,resolutionScale,customBitrate,fps]);
 
   const runCompress = async () => {
-    if (!file) return;
+    if (!file||!videoMeta) return;
     setIsCompressing(true);
     setProgress(5);
 
     try {
       const bps = getPresetBitrate() * 1000;
-      const targetHeight = preset === 'small' ? 480 : preset === 'balanced' ? 720 : resolutionScale;
-      const targetWidth = Math.round((targetHeight * 16) / 9);
+      const targetHeight = Math.max(2,Math.floor(Math.min(videoMeta.height,preset==='small'?480:preset==='balanced'?720:resolutionScale)/2)*2);
+      const targetWidth = Math.max(2,Math.round(targetHeight*videoMeta.width/videoMeta.height/2)*2);
 
       const res = await processVideo(
         file,
@@ -94,7 +86,7 @@ export const VideoCompressor: React.FC = () => {
         category: 'video',
       });
     } catch (err) {
-      console.error(err);
+      reportToolError(err);
       setIsCompressing(false);
     }
   };
@@ -102,15 +94,17 @@ export const VideoCompressor: React.FC = () => {
   const downloadCompressed = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_compressed.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isCompressing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500">
           <Minimize2 size={20} />
@@ -118,7 +112,7 @@ export const VideoCompressor: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Video Compressor</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Smart multi-pass compression reduces video storage requirements by up to 80%.
+            Pilih target bitrate dan resolusi. Ukuran hasil bergantung pada sumber dan dapat lebih besar daripada aslinya.
           </p>
         </div>
       </div>
@@ -162,13 +156,13 @@ export const VideoCompressor: React.FC = () => {
               <div>
                 <div className="text-[11px] text-slate-400 uppercase font-medium">Estimated Size</div>
                 <div className="mt-1 text-base sm:text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                  ~{estimatedSizeMb.toFixed(1)} MB
+                  {resultBlob?`${(resultBlob.size/1048576).toFixed(2)} MB`:`~${estimatedSizeMb.toFixed(2)} MB`}
                 </div>
               </div>
               <div>
-                <div className="text-[11px] text-slate-400 uppercase font-medium">Estimated Reduction</div>
+                <div className="text-[11px] text-slate-400 uppercase font-medium">Perubahan ukuran hasil</div>
                 <div className="mt-1 text-base sm:text-lg font-bold text-emerald-500">
-                  ~{reductionPercent}%
+                  {reductionPercent===null?'—':reductionPercent>=0?`${reductionPercent}% lebih kecil`:`${-reductionPercent}% lebih besar`}
                 </div>
               </div>
             </div>
@@ -180,10 +174,10 @@ export const VideoCompressor: React.FC = () => {
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 {[
-                  { id: 'max', label: 'Max Quality', sub: '-25% size' },
-                  { id: 'high', label: 'High Quality', sub: '-50% size' },
-                  { id: 'balanced', label: 'Balanced', sub: '-68% size' },
-                  { id: 'small', label: 'Small File', sub: '-82% size' },
+                  { id: 'max', label: 'Max Quality', sub: '4000 kbps' },
+                  { id: 'high', label: 'High Quality', sub: '2500 kbps' },
+                  { id: 'balanced', label: 'Balanced', sub: '1400 kbps' },
+                  { id: 'small', label: 'Small File', sub: '750 kbps' },
                   { id: 'custom', label: 'Custom', sub: 'Manual specs' },
                 ].map((p) => (
                   <button
@@ -283,6 +277,6 @@ export const VideoCompressor: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

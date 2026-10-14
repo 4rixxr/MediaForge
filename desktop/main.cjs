@@ -64,13 +64,16 @@ function bundledBin(name) {
   const root = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../vendor/win');
   return path.join(root, 'bin', name + '.exe');
 }
+const {registerBurner}=require('./burner.cjs');
+registerBurner({app,ipcMain,dialog,getWindow:()=>window,bundledBin});
+require('./media.cjs').registerMedia({ipcMain,getWindow:()=>window,bundledBin});
 async function start() {
   if (process.platform !== 'win32') {
     dialog.showErrorBox('MediaForge Studio', 'Paket desktop ini ditujukan untuk Windows.');
     app.quit();
     return;
   }
-  for (const bin of ['yt-dlp', 'ffmpeg', 'ffprobe']) {
+  for (const bin of ['yt-dlp', 'ffmpeg', 'ffprobe', 'node']) {
     if (!fs.existsSync(bundledBin(bin))) {
       throw Error(`${bin}.exe tidak ditemukan. Gunakan installer/portable hasil GitHub Actions, bukan ZIP source code.`);
     }
@@ -79,28 +82,20 @@ async function start() {
   process.env.MEDIAFORGE_YTDLP = bundledBin('yt-dlp');
   process.env.MEDIAFORGE_FFMPEG = bundledBin('ffmpeg');
   process.env.MEDIAFORGE_FFPROBE = bundledBin('ffprobe');
+  process.env.MEDIAFORGE_JS_RUNTIME = 'node:' + bundledBin('node');
   const {startServer} = await import('../server.js');
   const server = await startServer({port:0, host:'127.0.0.1'});
   const {port} = server.address();
-  app.once('before-quit', () => { server.close(); server.closeAllConnections(); });
+  app.once('will-quit', () => { server.close(); server.closeAllConnections(); });
   const url = `http://127.0.0.1:${port}`;
-  if (process.argv.includes('--smoke-test')) {
-    const response = await fetch(url);
-    if (!response.ok || !(await response.text()).includes('id="root"')) {
-      throw Error('Packaged UI could not be served.');
-    }
-    require('electron-updater');
-    console.log('PASS: packaged Electron starts, loads backend/UI, and resolves updater.');
-    app.exit(0);
-    return;
-  }
+  const smoke=process.argv.includes('--smoke-test');
   window = new BrowserWindow({
     width: 1320, height: 880, minWidth: 880, minHeight: 630,
     show: false,
     webPreferences: {nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, preload: path.join(__dirname, 'preload.cjs')},
     backgroundColor: '#101915',
   });
-  window.once('ready-to-show', () => window.show());
+  if(!smoke)window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(({url: target}) => {
     if (/^https:\/\//.test(target)) shell.openExternal(target);
     return {action: 'deny'};
@@ -109,6 +104,18 @@ async function start() {
     if (!target.startsWith(url + '/')) { event.preventDefault(); if (/^https:\/\//.test(target)) shell.openExternal(target); }
   });
   await window.loadURL(url);
+  if(smoke){
+    require('electron-updater');
+    const result=await window.webContents.executeJavaScript(`(async()=>{
+      if(!window.mediaforgeMedia?.convert)throw Error('Native media preload bridge missing');
+      const data=new ArrayBuffer(44+44100*2),v=new DataView(data),text=(offset,s)=>{for(let i=0;i<s.length;i++)v.setUint8(offset+i,s.charCodeAt(i));};
+      text(0,'RIFF');v.setUint32(4,data.byteLength-8,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,44100,true);v.setUint32(28,88200,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,88200,true);
+      const result=await window.mediaforgeMedia.convert('packaged-smoke',{kind:'audio',format:'opus',options:{bitrate:128,sampleRate:48000,channels:2},bytes:data});
+      return {magic:new TextDecoder().decode(result.bytes.slice(0,4)),length:result.bytes.length};
+    })()`);
+    if(result.magic!=='OggS'||result.length<100)throw Error('Packaged native conversion failed');
+    console.log('PASS: packaged Electron UI/preload/IPC, bundled FFmpeg Opus conversion, and updater.');app.exit(0);return;
+  }
   configureUpdates();
   // Allow the UI to subscribe before checking; errors never prevent app launch.
   setTimeout(() => { if (updater) updater.checkForUpdates().catch(err => updateMessage('error', {message:String(err.message || err)})); }, 2500);

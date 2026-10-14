@@ -19,31 +19,65 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          architecture: x64
           cache: 'npm'
+      - name: Validate source and PowerShell syntax
+        shell: pwsh
+        run: |
+          node scripts/check-build-inputs.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/check-powershell.ps1
       - name: Install locked dependencies including Electron
-        run: npm ci --no-audit --no-fund
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ci-logs -Force | Out-Null
+          npm ci --include=dev --no-audit --no-fund 2>&1 | Tee-Object ci-logs/npm-ci.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify Electron binary
         run: npm run verify:electron
       - name: Bundle yt-dlp and FFmpeg
         shell: pwsh
         run: ./scripts/fetch-windows-tools.ps1
+      - name: Install VCD authoring engine
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-vcdimager
+      - name: Stage VCD engine and runtime DLLs
+        shell: msys2 {0}
+        run: bash scripts/stage-vcdimager.sh
+      - name: Fetch verified CDRDAO
+        shell: pwsh
+        run: ./scripts/fetch-cdrdao.ps1
+      - name: Check native media and optical tools
+        shell: pwsh
+        run: ./scripts/test-optical-windows.ps1
       - name: Type check
         run: npm run lint
       - name: Regression tests
-        run: npm test
+        shell: pwsh
+        run: |
+          npm test 2>&1 | Tee-Object ci-logs/regressions.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The package script builds dist, stages the app, installs locked runtime
       # dependencies, verifies staging, and only then invokes electron-builder.
       - name: Build Setup EXE
-        run: npm run package:win
+        shell: pwsh
+        run: |
+          npm run package:win 2>&1 | Tee-Object ci-logs/package.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify EXE and packaged runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $file = Get-ChildItem release -Filter 'MediaForge-Studio-Setup-*.exe' | Select-Object -First 1
           if (-not $file -or $file.Length -lt 30000000) { throw 'EXE missing or suspiciously small' }
-          foreach ($name in @('yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe')) {
+          foreach ($name in @('yt-dlp.exe', 'node.exe', 'ffmpeg.exe', 'ffprobe.exe', 'vcdimager.exe', 'cdrdao/cdrdao.exe')) {
             if (-not (Test-Path "release/win-unpacked/resources/bin/$name")) { throw "Missing bundled $name" }
           }
+          node scripts/verify-windows-tools.cjs release/win-unpacked/resources
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/verify-packaged.cjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-FileHash $file.FullName -Algorithm SHA256 | Format-List
@@ -59,12 +93,13 @@ jobs:
             release/*.blockmap
           if-no-files-found: error
           retention-days: 30
-      - name: Upload builder diagnostics
-        if: failure()
+      - name: Upload build diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: MediaForge-Setup-Build-Diagnostics
           path: |
+            ci-logs/
             release/builder-debug.yml
             release/builder-effective-config.yaml
           if-no-files-found: ignore

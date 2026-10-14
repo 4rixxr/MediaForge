@@ -36,6 +36,8 @@ export async function convertImagesToPdf(
     throw new Error('Please add at least one image to convert to PDF.');
   }
 
+  if(!Number.isFinite(options.marginMm)||options.marginMm<0)throw Error('Margin PDF tidak valid.');
+
   // Initialize jsPDF
   let doc: jsPDF | null = null;
 
@@ -50,6 +52,7 @@ export async function convertImagesToPdf(
     canvas.height = isRotated90 ? img.naturalWidth : img.naturalHeight;
 
     const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate((item.rotation * Math.PI) / 180);
     ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
@@ -94,8 +97,9 @@ export async function convertImagesToPdf(
 
     // Calculate dimensions with margin
     const margin = options.marginMm;
-    const availableWidth = Math.max(10, pageWidthMm - margin * 2);
-    const availableHeight = Math.max(10, pageHeightMm - margin * 2);
+    const availableWidth = pageWidthMm - margin * 2;
+    const availableHeight = pageHeightMm - margin * 2;
+    if(availableWidth<=0||availableHeight<=0)throw Error('Margin terlalu besar untuk ukuran halaman. Kurangi margin atau pilih A4.');
 
     let finalRenderWidth = availableWidth;
     let finalRenderHeight = availableHeight;
@@ -117,7 +121,15 @@ export async function convertImagesToPdf(
       }
     }
 
+    if(options.imageFit==='cover'){
+      const scale=Math.max(availableWidth/imgWidth,availableHeight/imgHeight);
+      finalRenderWidth=imgWidth*scale;finalRenderHeight=imgHeight*scale;
+      offsetX=margin+(availableWidth-finalRenderWidth)/2;offsetY=margin+(availableHeight-finalRenderHeight)/2;
+    }
+    doc!.saveGraphicsState();
+    doc!.rect(margin,margin,availableWidth,availableHeight);doc!.clip();doc!.discardPath();
     doc!.addImage(imgDataUrl, 'JPEG', offsetX, offsetY, finalRenderWidth, finalRenderHeight, undefined, 'FAST');
+    doc!.restoreGraphicsState();
 
     if (onProgress) {
       onProgress(Math.round(((i + 1) / items.length) * 100));

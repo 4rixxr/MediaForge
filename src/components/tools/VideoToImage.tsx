@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import {useObjectUrls} from '../../services/useObjectUrls';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { ImageDown, Download, RotateCw, CheckCircle2, Archive } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { extractVideoFrames } from '../../services/videoProcessor';
@@ -12,6 +14,10 @@ export const VideoToImage: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [frames, setFrames] = useState<{ blob: Blob; timestamp: number; url: string }[]>([]);
   const [zipBlob, setZipBlob] = useState<Blob | null>(null);
+
+  useObjectUrls(frames.map(frame=>frame.url));
+
+  useEffect(()=>{setZipBlob(null);setFrames([]);},[file,intervalOption,customInterval,format]);
 
   const handleFile = (files: File[]) => {
     if (!files[0]) return;
@@ -40,7 +46,7 @@ export const VideoToImage: React.FC = () => {
       setZipBlob(res.zipBlob || null);
       setIsExtracting(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsExtracting(false);
     }
   };
@@ -48,15 +54,17 @@ export const VideoToImage: React.FC = () => {
   const downloadZip = () => {
     if (!zipBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(zipBlob);
+    const downloadUrl = URL.createObjectURL(zipBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_frames.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isExtracting} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-500/10 text-teal-500">
           <ImageDown size={20} />
@@ -202,6 +210,6 @@ export const VideoToImage: React.FC = () => {
           )}
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

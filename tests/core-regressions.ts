@@ -1,3 +1,4 @@
+import {mediaFileCategory} from '../src/services/mediaFileType';
 import assert from 'node:assert/strict';
 import { audioBufferToWav, convertAudio } from '../src/services/audioProcessor';
 import { convertImage } from '../src/services/imageProcessor';
@@ -72,8 +73,13 @@ assert.ok(deleted.length >= deletedBeforeFailure + 2, 'Failed jobs must clean up
   async decodeAudioData() { return { ...buffer, duration: 1 }; }
 } };
 (globalThis as any).MediaRecorder = undefined;
-await assert.rejects(convertAudio(new Blob(['source']), { format: 'mp3' }), /requires the FFmpeg engine/);
+await assert.rejects(convertAudio(new Blob(['source']), { format: 'mp3' }), /Conversion failed/);
 const nativeWav = await convertAudio(new Blob(['source']), { format: 'wav', sampleRate: 24000 });
 assert.equal(nativeWav.blob.type, 'audio/wav');
 assert.equal(new DataView(await nativeWav.blob.arrayBuffer()).getUint32(40, true), 24000 * 4);
 console.log('PASS: WAV duration/header, image output MIME, FFmpeg serialization, failure cleanup, honest audio fallback');
+
+for(const [name,category] of [['SOURCE.AIF','audio'],['movie.WMV','video'],['photo.PNG','image'],['note.pdf','document'],['unknown.xyz',null]])assert.equal(mediaFileCategory({name:name!,type:''}),category);
+await assert.rejects(convertAudio(input,{format:'wav',sampleRate:0}),/Sample rate/);
+await assert.rejects(convertAudio(input,{format:'wav',volume:-1}),/Volume/);
+console.log('PASS: empty MIME extension classification and WAV option validation');

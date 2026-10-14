@@ -14,6 +14,7 @@ export default defineConfig(() => {
       },
     },
     optimizeDeps: {
+      include: ['mediabunny'],
       exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
     },
     server: {

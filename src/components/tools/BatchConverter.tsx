@@ -1,4 +1,5 @@
 import React from 'react';
+import {audioProfiles,videoProfiles} from '../../../shared/media-profiles.js';
 import {
   ListOrdered,
   Download,
@@ -38,10 +39,14 @@ export const BatchConverter: React.FC = () => {
     return (bytes / 1024).toFixed(0) + ' KB';
   };
 
-  const getFormatOptions = (category: string) => {
-    if (category === 'video') return ['MP4', 'WEBM', 'MKV', 'GIF'];
-    if (category === 'audio') return ['MP3', 'WAV', 'AAC', 'OGG', 'OPUS', 'FLAC'];
-    if (category === 'image') return ['WEBP', 'JPG', 'PNG', 'AVIF', 'ICO'];
+  const [avifSupported]=React.useState(()=>document.createElement('canvas').toDataURL('image/avif').startsWith('data:image/avif'));
+
+  const getFormatOptions = (category: string,mode?:string) => {
+    if(mode==='audio-video')return ['MP4','WEBM'];
+    if(mode==='video-audio')return Object.keys(audioProfiles).map(f=>f.toUpperCase());
+    if (category === 'video') return Object.keys(videoProfiles).map(f=>f.toUpperCase());
+    if (category === 'audio') return Object.keys(audioProfiles).map(f=>f.toUpperCase());
+    if (category === 'image') return ['WEBP', 'JPG', 'PNG', ...(avifSupported?['AVIF']:[]), 'BMP', 'ICO'];
     return ['PDF'];
   };
 
@@ -166,10 +171,10 @@ export const BatchConverter: React.FC = () => {
                   {job.status === 'waiting' && (
                     <select
                       value={job.targetFormat.toUpperCase()}
-                      onChange={(e) => updateJob(job.id, { targetFormat: e.target.value.toLowerCase() })}
+                      onChange={(e) => updateJob(job.id, { targetFormat: e.target.value.toLowerCase(),settings:{...job.settings,bitrate:undefined,quality:undefined} })}
                       className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-xs font-bold uppercase text-slate-800 dark:text-slate-200"
                     >
-                      {getFormatOptions(job.category).map((fmt) => (
+                      {getFormatOptions(job.category,job.settings?.mode).map((fmt) => (
                         <option key={fmt} value={fmt}>{fmt}</option>
                       ))}
                     </select>

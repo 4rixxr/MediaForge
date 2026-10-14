@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Layers, ArrowUp, ArrowDown, Trash2, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { mergeAudioFiles } from '../../services/audioProcessor';
@@ -7,6 +8,8 @@ export const AudioMerger: React.FC = () => {
   const [files, setFiles] = useState<File[]>([]);
   const [isMerging, setIsMerging] = useState(false);
   const [resultBlob, setResultBlob] = useState<Blob | null>(null);
+
+  useEffect(()=>{setResultBlob(null);},[files]);
 
   const handleFiles = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
@@ -35,7 +38,7 @@ export const AudioMerger: React.FC = () => {
       setResultBlob(res.blob);
       setIsMerging(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsMerging(false);
     }
   };
@@ -43,15 +46,17 @@ export const AudioMerger: React.FC = () => {
   const downloadMerged = () => {
     if (!resultBlob) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `MediaForge_Merged_${Date.now()}.wav`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isMerging} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
           <Layers size={20} />
@@ -159,6 +164,6 @@ export const AudioMerger: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

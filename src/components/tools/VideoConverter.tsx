@@ -1,4 +1,6 @@
+import {useObjectUrls} from '../../services/useObjectUrls';
 import React, { useState, useEffect } from 'react';
+import {videoProfiles} from '../../../shared/media-profiles.js';
 import {
   Video,
   Settings2,
@@ -36,37 +38,27 @@ interface VideoFileItem {
 export const VideoConverter: React.FC = () => {
   const [items, setItems] = useState<VideoFileItem[]>([]);
   const [targetFormat, setTargetFormat] = useState('mp4');
-  const [videoCodec, setVideoCodec] = useState('h264');
   const [resolutionPreset, setResolutionPreset] = useState('original');
   const [frameRate, setFrameRate] = useState('original');
   const [bitrateMode, setBitrateMode] = useState('medium');
-  const [audioCodec, setAudioCodec] = useState('aac');
-  const [audioBitrate, setAudioBitrate] = useState('192');
   const [removeAudio, setRemoveAudio] = useState(false);
-  const [highQualityMode, setHighQualityMode] = useState(true);
+  const [highQualityMode, setHighQualityMode] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { addHistoryItem } = useHistory();
 
-  const formats = ['MP4', 'WEBM', 'MKV', 'MOV', 'AVI', 'GIF', 'TS'];
+  const [isConvertingAll,setIsConvertingAll]=useState(false);
+  useObjectUrls(items.flatMap(item=>[item.previewUrl,item.outputUrl]));
+  useEffect(()=>{setItems(previous=>previous.map(item=>({...item,status:'idle',progress:0,outputBlob:undefined,outputUrl:undefined,errorMessage:undefined})));},[targetFormat,resolutionPreset,frameRate,bitrateMode,removeAudio,highQualityMode]);
+
+  const formats = ['MP4', 'WEBM', 'MKV', 'MOV', 'AVI', 'GIF', 'TS', 'MPEG', 'MPEG2', 'DAT'];
 
   const handleFilesAdded = async (files: File[]) => {
     for (const file of files) {
       try {
         const previewUrl = URL.createObjectURL(file);
-        const { video, cleanup } = await loadVideoElement(file);
-        const newItem: VideoFileItem = {
-          id: 'v-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-          file,
-          previewUrl,
-          duration: video.duration || 0,
-          width: video.videoWidth || 1280,
-          height: video.videoHeight || 720,
-          size: file.size,
-          targetFormat: targetFormat.toLowerCase(),
-          status: 'idle',
-          progress: 0,
-        };
-        cleanup();
+        let duration=0,width=0,height=0;
+        try{const {video,cleanup}=await loadVideoElement(file);duration=Number.isFinite(video.duration)?video.duration:0;width=video.videoWidth;height=video.videoHeight;cleanup();}catch{ /* FFmpeg can read formats the browser cannot preview. */ }
+        const newItem:VideoFileItem={id:'v-'+crypto.randomUUID(),file,previewUrl,duration,width,height,size:file.size,targetFormat,status:'idle',progress:0};
         setItems((prev) => [...prev, newItem]);
       } catch (e) {
         console.error('Failed to parse video metadata', e);
@@ -116,7 +108,7 @@ export const VideoConverter: React.FC = () => {
       if (bitrateMode === 'high') bps = 5000000;
       if (highQualityMode) bps = Math.round(bps * 1.5);
 
-      const fpsVal = frameRate === '60' ? 60 : frameRate === '24' ? 24 : 30;
+      const fpsVal = ['dat','mpeg','mpeg2'].includes(targetFormat)?25:frameRate==='original'?undefined:Number(frameRate);
 
       const result = await processVideo(
         item.file,
@@ -143,6 +135,7 @@ export const VideoConverter: React.FC = () => {
           it.id === item.id
             ? {
                 ...it,
+                targetFormat:outExt,
                 status: 'done',
                 progress: 100,
                 outputBlob: result.blob,
@@ -175,23 +168,22 @@ export const VideoConverter: React.FC = () => {
 
   const convertAll = async () => {
     const idleItems = items.filter((it) => it.status === 'idle' || it.status === 'error');
-    for (const item of idleItems) {
-      await convertSingleItem(item);
-    }
+    setIsConvertingAll(true);
+    try{for (const item of idleItems)await convertSingleItem(item);}finally{setIsConvertingAll(false);}
   };
 
   const downloadFile = (item: VideoFileItem) => {
     if (!item.outputBlob) return;
     const a = document.createElement('a');
     a.href = item.outputUrl || URL.createObjectURL(item.outputBlob);
-    a.download = `${item.file.name.replace(/\.[^/.]+$/, '')}.${targetFormat.toLowerCase()}`;
+    a.download = `${item.file.name.replace(/\.[^/.]+$/, '')}.${item.targetFormat.toLowerCase()}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
   return (
-    <div className="space-y-6 pb-12">
+    <fieldset disabled={isConvertingAll||items.some(item=>item.status==='converting')} style={{minWidth:0}} className="space-y-6 pb-12">
       {/* Title & Info */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -202,7 +194,7 @@ export const VideoConverter: React.FC = () => {
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Video Converter</h2>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Convert any video file to MP4, WebM, MKV, AVI, or GIF with full control over codecs and bitrates.
+            Convert video with the encoder selected for each format. DAT uses a fixed PAL VCD stream profile (352×288, 25 fps).
           </p>
         </div>
 
@@ -210,7 +202,7 @@ export const VideoConverter: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={convertAll}
-              disabled={items.every((it) => it.status === 'converting')}
+              disabled={items.some((it) => it.status === 'converting')||items.every(it=>it.status==='done')}
               className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-indigo-500 transition-colors disabled:opacity-50"
             >
               <RotateCw size={14} className={items.some((it) => it.status === 'converting') ? 'animate-spin' : ''} />
@@ -223,7 +215,7 @@ export const VideoConverter: React.FC = () => {
       {/* Upload Drop Zone */}
       <DropZone
         onFilesSelected={handleFilesAdded}
-        accept="video/*,.mp4,.mkv,.mov,.avi,.webm,.wmv,.flv,.ts"
+        accept="video/*,.mp4,.mkv,.mov,.avi,.webm,.wmv,.flv,.ts,.mpeg,.mpg,.mpeg2,.dat"
         label="Drop video files here"
         description="Supports MP4, MOV, WEBM, MKV, AVI, FLV, and TS videos"
         compact={items.length > 0}
@@ -240,15 +232,15 @@ export const VideoConverter: React.FC = () => {
             <div className="flex flex-wrap gap-1">
               {formats.map((fmt) => (
                 <button
-                  key={fmt}
-                  onClick={() => setTargetFormat(fmt)}
+                  key={fmt==='MPEG2'?'MPEG-2':fmt}
+                  onClick={() => setTargetFormat(fmt.toLowerCase())}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                    targetFormat === fmt
+                    targetFormat === fmt.toLowerCase()
                       ? 'bg-indigo-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                   }`}
                 >
-                  {fmt}
+                  {fmt==='MPEG2'?'MPEG-2':fmt}
                 </button>
               ))}
             </div>
@@ -268,26 +260,17 @@ export const VideoConverter: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-xs">
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Video Codec</label>
-              <select
-                value={videoCodec}
-                onChange={(e) => setVideoCodec(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-slate-100 focus:outline-none"
-              >
-                <option value="h264">H.264 / AVC (Most Compatible)</option>
-                <option value="hevc">H.265 / HEVC</option>
-                <option value="vp9">VP9 (High Web Efficiency)</option>
-                <option value="av1">AV1 (Next-Gen)</option>
-              </select>
+              <p className="rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5">{videoProfiles[targetFormat].label}</p>
             </div>
 
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Resolution</label>
               <select
-                value={resolutionPreset}
+                disabled={targetFormat==='dat'} value={targetFormat==='dat'?'vcd':resolutionPreset}
                 onChange={(e) => setResolutionPreset(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-slate-100 focus:outline-none"
               >
-                <option value="original">Original Resolution</option>
+                <option value="vcd" hidden>352 × 288 · VCD PAL</option><option value="original">Original Resolution</option>
                 <option value="1080p">1920 × 1080 (1080p FHD)</option>
                 <option value="720p">1280 × 720 (720p HD)</option>
                 <option value="480p">854 × 480 (480p SD)</option>
@@ -297,11 +280,11 @@ export const VideoConverter: React.FC = () => {
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Frame Rate</label>
               <select
-                value={frameRate}
+                disabled={['dat','mpeg','mpeg2'].includes(targetFormat)} value={['dat','mpeg','mpeg2'].includes(targetFormat)?'25':frameRate}
                 onChange={(e) => setFrameRate(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-slate-100 focus:outline-none"
               >
-                <option value="original">Original FPS</option>
+                <option value="original">Original FPS</option><option value="25">25 FPS</option>
                 <option value="60">60 FPS (Smooth)</option>
                 <option value="30">30 FPS (Standard)</option>
                 <option value="24">24 FPS (Cinematic)</option>
@@ -311,11 +294,11 @@ export const VideoConverter: React.FC = () => {
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Video Bitrate</label>
               <select
-                value={bitrateMode}
+                disabled={targetFormat==='dat'} value={targetFormat==='dat'?'vcd':bitrateMode}
                 onChange={(e) => setBitrateMode(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-slate-100 focus:outline-none"
               >
-                <option value="medium">Medium Bitrate (~2.5 Mbps)</option>
+                <option value="vcd" hidden>VCD · 1150 kbps</option><option value="medium">Medium Bitrate (~2.5 Mbps)</option>
                 <option value="high">High Bitrate (~5.0 Mbps)</option>
                 <option value="low">Low Bitrate (~1.0 Mbps)</option>
               </select>
@@ -336,11 +319,11 @@ export const VideoConverter: React.FC = () => {
               <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
-                  checked={highQualityMode}
+                  disabled={targetFormat==='dat'} checked={targetFormat==='dat'?false:highQualityMode}
                   onChange={(e) => setHighQualityMode(e.target.checked)}
                   className="rounded text-indigo-600 focus:ring-0"
                 />
-                <span>High Quality Mode</span>
+                <span>Naikkan target bitrate 50%</span>
               </label>
             </div>
           </div>
@@ -385,14 +368,14 @@ export const VideoConverter: React.FC = () => {
                       {item.file.name}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      <span>{item.width} × {item.height}</span>
+                      <span>{item.width?`${item.width} × ${item.height}`:'Preview metadata unavailable'}</span>
                       <span>•</span>
                       <span>{formatSeconds(item.duration)}</span>
                       <span>•</span>
                       <span>{formatFileSize(item.size)}</span>
                       <span>•</span>
                       <span className="font-semibold text-indigo-600 dark:text-indigo-400 uppercase">
-                        → {targetFormat}
+                        → {item.status==='done'?item.targetFormat:targetFormat}
                       </span>
                     </div>
 
@@ -455,6 +438,6 @@ export const VideoConverter: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

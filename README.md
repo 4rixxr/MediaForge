@@ -1,67 +1,59 @@
-> **UI 1.7.1:** ruang Converter kini mengikuti gambar referensi. Baca [UI_UPDATE_1.7.1.md](UI_UPDATE_1.7.1.md) untuk fitur dan hasil validasi.
+# MediaForge Studio 1.8.3
 
-> **Perbaikan build Electron (11 Oktober 2026):** baca [DEBUGGING_DAN_CARA_BUILD.md](DEBUGGING_DAN_CARA_BUILD.md) untuk temuan, hasil tes, dan langkah GitHub terbaru.
+Paket source perbaikan konversi dan build Windows. **ZIP ini bukan installer EXE.**
 
-# MediaForge Studio v1.3.0 — Web gratis + backend lokal opsional
+Baca [MULAI_DI_SINI.md](MULAI_DI_SINI.md) untuk membuat installer/portable baru. Rincian perubahan dan bukti pengujian ada di [GITHUB_ACTIONS_1.8.3.md](GITHUB_ACTIONS_1.8.3.md).
 
-**Deploy gratis GitHub Pages:** baca [`GITHUB_PAGES_GRATIS.md`](GITHUB_PAGES_GRATIS.md). Workflow `.github/workflows/deploy-pages.yml` tersedia; **belum dipublikasikan otomatis ke akun GitHub kamu**. Situs statis dapat diakses di HP maupun desktop. Peralatan pemrosesan file berbasis browser berjalan lokal bila browser mendukung formatnya.
+## Menjalankan preview
 
-**Catatan jujur:** Pengunduhan URL YouTube/Bstation/Dailymotion tidak berjalan pada hosting statis GitHub Pages; memerlukan backend lokal Node.js + yt-dlp + FFmpeg di komputer. Apple Music/Tidal/Deezer dengan DRM tidak didukung. Tidak ada biaya hosting atau iklan dari MediaForge, tetapi tidak semua fitur dapat dibuat bekerja identik di setiap perangkat hanya dengan GitHub Pages.
+Node.js 22.12+:
 
-# MediaForge — Studio revision 1.1.0
-
-Redesain workspace dan perbaikan bug dari MediaForge v1.0.0.
-Status: **kandidat beta; belum disetujui untuk produksi publik penuh**.
-
-## Menjalankan
-
-Gunakan Node.js 22.12+ (diuji dengan Node.js 24).
-
-```bash
+```sh
 npm ci
 npm run dev
 ```
 
-Buka alamat localhost yang ditampilkan. Untuk build:
+Build preview produksi:
 
-```bash
-npm run check
+```sh
+npm run build
+npm start
+```
+
+Buka `http://127.0.0.1:8787`. Jangan membuka `dist/index.html` langsung melalui `file://`.
+
+Engine browser disalin dari dependensi terkunci ke `public/ffmpeg` oleh `prebuild`/`predev`, kemudian masuk ke `dist`. Konversi file tidak lagi mengambil engine dari CDN. Aplikasi Electron menggunakan FFmpeg/FFprobe native yang disertakan dalam paket Windows. Unduh dari URL tetap membutuhkan internet; preview browser memerlukan backend lokal untuk fitur tersebut.
+
+## Format dan alat
+
+- Audio: MP3, WAV, AAC, M4A, FLAC, OGG Vorbis (Q −1…10), Opus, WMA v2. WAV/FLAC tidak memakai kontrol bitrate lossy.
+- Video: MP4, WebM, MKV, MOV, AVI, TS, GIF, MPEG-1, MPEG-2 program stream, DAT berisi stream VCD PAL.
+- Crop, resize, trim, ekstrak audio/frame, gabung/potong audio, visualizer audio-ke-video.
+- Gambar: JPEG/PNG/WebP/BMP/ICO; AVIF hanya ditawarkan bila encoder browser tersedia. PDF dibuat dari gambar, bukan editor umum PDF.
+- Bahasa menu: Indonesia, Inggris, Mandarin, Thailand, Jepang.
+- Burner Windows: VCD 2.0, Audio CD, CD data, DVD data. Rincian format image dan keterbatasan ada pada catatan versi.
+
+## Verifikasi
+
+```sh
+npm run lint
 npm test
-npm run preview
+npm run prepare:desktop
 ```
 
-Gunakan `package-lock.json` sebagai lockfile. `bun.lock` lama telah dihapus karena tidak lagi cocok dengan dependensi. Dependensi AI/Express/dotenv yang tidak digunakan dan konflik esbuild lama telah dibersihkan. `dist/` berisi build statis; buka melalui server HTTP, bukan klik langsung index.html.
+Tes yang memakai encoder native:
 
-## Isi paket
-
-- `src/`: kode lengkap yang telah diubah.
-- `review/STUDIO_REVIEW.md`: penilaian lima peran, bukti pengujian, dan syarat produksi.
-- `review/*-release.png`: screenshot dari aplikasi berjalan pada desktop, dark mode, dan mobile.
-- `review/browser-results.json`: hasil smoke test Chromium.
-- `tests/core-regressions.ts`: tes format media, audio, dan antrean FFmpeg.
-- `tests/browser-smoke.cjs`: pengujian browser yang dapat diulang.
-- `dist/`: hasil build Vite.
-
-## Tes browser opsional
-
-```bash
-npm install --no-save playwright
-npx playwright install chromium
-node tests/browser-smoke.cjs
+```sh
+MEDIAFORGE_NATIVE_TEST=1 npm test
+node tests/bitrate-matrix.cjs
 ```
 
-Tes memakai port 3001; pastikan kosong. Ini memasang tooling QA lokal tanpa menambahkannya sebagai dependensi produksi.
+Pada PowerShell, gunakan `$env:MEDIAFORGE_NATIVE_TEST='1'` sebelum `npm test`. FFmpeg/FFprobe harus tersedia di PATH atau melalui `MEDIAFORGE_FFMPEG`/`MEDIAFORGE_FFPROBE`. Untuk menguji image VCD, isi `MEDIAFORGE_VCDIMAGER` dengan path executable.
 
-## Batas yang perlu diketahui
+Tes browser QA membutuhkan Playwright dan Chromium (tidak disertakan sebagai dependensi produksi): `tests/browser-smoke.cjs`, `tests/media-browser-smoke.cjs`, `tests/tool-browser-regressions.cjs`, `tests/language-smoke.cjs`. `MEDIAFORGE_CHROMIUM` dapat menunjuk browser yang sudah terpasang. Jalankan `npm run build` dahulu; tes alat juga menjalankan Vite lokal. Jalankan tes yang memakai port sama secara berurutan.
 
-Konversi gambar menggunakan Canvas. Dukungan encode AVIF/BMP mengikuti browser; format yang tidak didukung menghasilkan error, bukan berkas dengan ekstensi palsu. FFmpeg memuat engine eksternal saat diperlukan, sehingga pemuatan pertama memerlukan internet. Fitur PDF berfokus pada pembuatan PDF dari gambar dan informasi berkas dasar, bukan merge/split PDF.
+## Batas implementasi
 
-Pembatalan antrean menolak hasil dan penambahan riwayat, namun belum menghentikan komputasi codec yang sedang aktif. Jangan menjanjikan pemrosesan tanpa batas ukuran, offline penuh, atau kompatibilitas semua codec sebelum pengujian lanjutan.
+Pemrosesan browser dan transfer IPC memakai memori; tidak ada klaim ukuran berkas tanpa batas. Membatalkan antrean menolak hasil, tetapi belum menghentikan proses encoder aktif. Web Opus menggunakan WebCodecs dan Ogg muxer untuk menghindari bug libopus dalam distribusi FFmpeg.wasm; browser tanpa AudioEncoder akan menampilkan pesan yang jelas. Desktop memakai libopus native.
 
-## URL Downloader (v1.2.0)
-
-This release adds an **URL Downloader** workspace. Video URLs from YouTube, Bstation/Bilibili and Dailymotion can be analyzed using a **local** backend, with output format, maximum resolution, center aspect-ratio crop, trim times, extraction to audio, and a final review with estimated file size. Original audio mode copies the selected source audio without re-encoding where supported. Transcoding cannot increase source fidelity. Actual downloaded sizes may differ from estimates.
-
-**Requirements:** Node.js >=22, `yt-dlp` (current version) and `ffmpeg` + `ffprobe` on PATH. Install dependencies with `npm install`, build with `npm run build`, then launch `npm start` and open `http://127.0.0.1:8787`. For development, run `npm run dev:api` in one terminal and `npm run dev` in another (Vite proxies `/api/url` to the API). The local backend binds to loopback by default and is **not designed for public hosting**. A normal static-only deployment cannot download cross-origin remote media.
-
-**Licensing & limitations:** download only content you own or are authorized to download in compliance with platform rules. Apple Music, Tidal and Deezer links are identified in the UI, but protected/subscription streams are deliberately **not downloaded**: their DRM and entitlement mechanisms are not bypassed. You can use the official offline playback features in those services. Video host availability is best effort and depends on accessible streams, current site extractor support and permissions. Playlist and live URLs are unsupported.
+Build Windows, COM/IMAPI, burner fisik, dan unduhan situs nyata harus diverifikasi pada Windows. Pemeriksaan lokal yang lulus bukan bukti semua kombinasi perangkat dan file bebas bug. Detail batas validasi dicatat pada catatan versi. Dokumen versi 1.7.x dan sebelumnya adalah arsip riwayat; gunakan panduan 1.8.3 ini untuk build terbaru.

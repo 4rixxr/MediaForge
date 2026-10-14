@@ -1,353 +1,80 @@
-/**
- * MediaForge - Local WebAssembly & FFmpeg.wasm Processing Engine
- * 100% In-Browser Execution - Zero Server Uploads - Strict Privacy
- */
-
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-
-export type FfmpegStatus = 'idle' | 'loading' | 'ready' | 'error' | 'fallback';
-
-export interface FfmpegProgress {
-  progress: number; // 0 to 100
-  time?: number;
-}
-
+import {FFmpeg} from '@ffmpeg/ffmpeg';
+import {fetchFile} from '@ffmpeg/util';
+import {audioProfiles,videoProfiles} from '../../shared/media-profiles.js';
+import {conversionArgs} from '../../shared/conversion.js';
+export type FfmpegStatus='idle'|'loading'|'ready'|'error'|'fallback';
+export interface FfmpegProgress {progress:number;time?:number}
+type AudioOptions={bitrate?:number;quality?:number;metadata?:Record<string,string>;sampleRate?:number;channels?:1|2;startTime?:number;endTime?:number;volume?:number};
+type VideoOptions={resolution?:{width:number;height:number};crop?:{x:number;y:number;width:number;height:number};bitrate?:number;fps?:number;startTime?:number;endTime?:number;removeAudio?:boolean;videoBitrate?:number};
 class FFmpegService {
-  private ffmpeg: FFmpeg | null = null;
-  private status: FfmpegStatus = 'idle';
-  private loadPromise: Promise<boolean> | null = null;
-  private logs: string[] = [];
-  private operationQueue: Promise<unknown> = Promise.resolve();
-
-  // The worker and its virtual filesystem can only execute one conversion at a time.
-  private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const pending = this.operationQueue.then(operation, operation);
-    this.operationQueue = pending.catch(() => undefined);
-    return pending;
+ private ffmpeg:FFmpeg|null=null;
+ private status:FfmpegStatus='idle';
+ private loadPromise:Promise<boolean>|null=null;
+ private operationQueue:Promise<unknown>=Promise.resolve();
+ private logs:string[]=[];
+ private serialize<T>(operation:()=>Promise<T>):Promise<T>{const result=this.operationQueue.then(operation,operation);this.operationQueue=result.catch(()=>undefined);return result;}
+ public getStatus(){return this.status;}
+ public isAvailable(){return this.status==='ready';}
+ private native(){return typeof window!=='undefined'?window.mediaforgeMedia:undefined;}
+ public async load(onProgress?:(message:string)=>void):Promise<boolean>{
+  if(this.native()){this.status='ready';return true;}
+  if(this.status==='ready'&&this.ffmpeg)return true;
+  if(this.loadPromise)return this.loadPromise;
+  this.loadPromise=(async()=>{
+   this.status='loading';onProgress?.('Memuat engine konversi dari paket aplikasi…');
+   const engine=new FFmpeg();this.ffmpeg=engine;
+   engine.on('log',({message})=>{this.logs.push(message);if(this.logs.length>50)this.logs.shift();});
+   try{
+    const base=new URL('./ffmpeg/',document.baseURI);
+    await engine.load({coreURL:new URL('ffmpeg-core.js',base).href,wasmURL:new URL('ffmpeg-core.wasm',base).href});
+    this.status='ready';return true;
+   }catch(error){engine.terminate();this.ffmpeg=null;this.status='error';console.error('Engine initialization failed',error);return false;}
+   finally{this.loadPromise=null;}
+  })();
+  return this.loadPromise;
+ }
+ private async convert(file:File,kind:'audio'|'video'|'audio-video',format:string,options:AudioOptions|VideoOptions,onProgress?:(percent:number)=>void):Promise<Blob>{
+  const input='input_'+crypto.randomUUID(),output='output_'+crypto.randomUUID()+'.'+format;
+  const args=conversionArgs(kind,format,options,input,output);
+  const native=this.native();
+  if(native){
+   const id=crypto.randomUUID(),unsubscribe=native.subscribe(p=>{if(p.id===id)onProgress?.(p.percent);});
+   try{onProgress?.(1);const result=await native.convert(id,{kind,format,options,bytes:await file.arrayBuffer()});onProgress?.(100);return new Blob([result.bytes as BlobPart],{type:result.mime});}finally{unsubscribe();}
   }
-
-  public getStatus(): FfmpegStatus {
-    return this.status;
+  // The distributed ffmpeg.wasm core has an upstream Opus 48 kHz stack overflow.
+  // Use the browser's real Opus encoder and an Ogg muxer, preserving rate/channels.
+  if(kind==='audio'&&format==='opus'){
+   const audio=options as AudioOptions;
+   const {Output,OggOutputFormat,BufferTarget,AudioBufferSource,Quality}=await import('mediabunny');
+   if(typeof AudioEncoder==='undefined')throw Error('Encoder Opus tidak tersedia di browser ini. Gunakan aplikasi desktop atau browser dengan WebCodecs AudioEncoder.');
+   const pcm=await this.convert(file,'audio','wav',{...audio,sampleRate:48000,metadata:undefined},p=>onProgress?.(Math.round(p*.65)));
+   const context=new OfflineAudioContext(audio.channels??2,1,48000);
+   const decoded=await context.decodeAudioData(await pcm.arrayBuffer());
+   const target=new BufferTarget(),output=new Output({format:new OggOutputFormat(),target});
+   const source=new AudioBufferSource({codec:'opus',quality:new Quality({bitrate:(audio.bitrate??128)*1000}),transform:{sampleRate:audio.sampleRate??48000,numberOfChannels:audio.channels??2}});
+   output.addAudioTrack(source);
+   const tags=audio.metadata||{};
+   output.setMetadataTags({title:tags.title,artist:tags.artist,album:tags.album,genre:tags.genre,raw:tags.date?{DATE:tags.date}:undefined});
+   try{await output.start();await source.add(decoded);source.close();await output.finalize();if(!target.buffer?.byteLength)throw Error('Encoder Opus menghasilkan berkas kosong.');onProgress?.(100);return new Blob([target.buffer],{type:audioProfiles.opus.mime});}
+   catch(error){await output.cancel();throw error;}
   }
-
-  public isAvailable(): boolean {
-    return this.status === 'ready';
-  }
-
-  /**
-   * Initializes and loads the WebAssembly FFmpeg core into the browser
-   */
-  public async load(onProgress?: (msg: string) => void): Promise<boolean> {
-    if (this.status === 'ready') return true;
-    if (this.loadPromise) return this.loadPromise;
-
-    this.loadPromise = (async () => {
-      this.status = 'loading';
-      onProgress?.('Initializing WebAssembly core...');
-
-      try {
-        this.ffmpeg = new FFmpeg();
-
-        this.ffmpeg.on('log', ({ message }) => {
-          this.logs.push(message);
-          if (this.logs.length > 100) this.logs.shift();
-        });
-
-        // Use unpkg CDN for the WebAssembly core files
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-        onProgress?.('Downloading FFmpeg.wasm WebAssembly binary...');
-
-        const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-        const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
-
-        await this.ffmpeg.load({
-          coreURL,
-          wasmURL,
-        });
-
-        this.status = 'ready';
-        onProgress?.('WebAssembly FFmpeg ready');
-        return true;
-      } catch (err) {
-        console.warn('FFmpeg.wasm could not be initialized:', err);
-        this.status = 'fallback';
-        return false;
-      }
-    })();
-
-    return this.loadPromise;
-  }
-
-  /**
-   * Execute video conversion locally using FFmpeg.wasm
-   */
-  public async convertVideoWithFFmpeg(
-    file: File,
-    targetFormat: string,
-    options?: {
-      videoCodec?: string;
-      resolution?: { width: number; height: number };
-      bitrate?: number;
-      fps?: number;
-      startTime?: number;
-      endTime?: number;
-      removeAudio?: boolean;
-    },
-    onProgress?: (progressPercent: number) => void
-  ): Promise<Blob> {
-    return this.serialize(() => this.runVideoConversion(file, targetFormat, options, onProgress));
-  }
-
-  private async runVideoConversion(
-    file: File,
-    targetFormat: string,
-    options?: {
-      videoCodec?: string;
-      resolution?: { width: number; height: number };
-      bitrate?: number;
-      fps?: number;
-      startTime?: number;
-      endTime?: number;
-      removeAudio?: boolean;
-    },
-    onProgress?: (progressPercent: number) => void
-  ): Promise<Blob> {
-    const isLoaded = await this.load();
-    if (!isLoaded || !this.ffmpeg) {
-      throw new Error('FFmpeg WebAssembly is not available');
-    }
-
-    const inputName = `input_${Date.now()}.${file.name.split('.').pop() || 'mp4'}`;
-    const outputExt = targetFormat.toLowerCase();
-    const outputName = `output_${Date.now()}.${outputExt}`;
-
-    onProgress?.(5);
-
-    // Listen to progress events
-    const progressHandler = ({ progress }: { progress: number }) => {
-      const pct = Math.min(99, Math.max(5, Math.round(progress * 100)));
-      onProgress?.(pct);
-    };
-
-    this.ffmpeg.on('progress', progressHandler);
-
-    try {
-      // Write input file to in-memory virtual filesystem
-      const fileData = await fetchFile(file);
-      await this.ffmpeg.writeFile(inputName, fileData);
-
-      const args: string[] = ['-y', '-i', inputName];
-
-      // Trim options
-      if (typeof options?.startTime === 'number' && options.startTime > 0) {
-        args.push('-ss', options.startTime.toString());
-      }
-      if (typeof options?.endTime === 'number' && options.endTime > 0) {
-        args.push('-to', options.endTime.toString());
-      }
-
-      // Video filters (scaling & fps)
-      const vfParts: string[] = [];
-      if (options?.resolution?.width && options?.resolution?.height) {
-        vfParts.push(`scale=${options.resolution.width}:${options.resolution.height}`);
-      }
-      if (options?.fps) {
-        vfParts.push(`fps=${options.fps}`);
-      }
-      if (vfParts.length > 0) {
-        args.push('-vf', vfParts.join(','));
-      }
-
-      // Bitrate
-      if (options?.bitrate) {
-        args.push('-b:v', `${Math.round(options.bitrate / 1000)}k`);
-      }
-
-      // Remove audio
-      if (options?.removeAudio) {
-        args.push('-an');
-      }
-
-      // Codec tuning based on output format
-      if (outputExt === 'mp4') {
-        args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p');
-      } else if (outputExt === 'webm') {
-        args.push('-c:v', 'libvpx', '-deadline', 'realtime', '-c:a', 'libvorbis');
-      } else if (outputExt === 'gif') {
-        args.push('-loop', '0');
-      }
-
-      args.push(outputName);
-
-      // Execute command in WebAssembly
-      const exitCode = await this.ffmpeg.exec(args);
-      if (exitCode !== 0) throw new Error('Conversion failed. The source or requested codec may not be supported.');
-
-      // Read output file from virtual filesystem
-      const data = await this.ffmpeg.readFile(outputName);
-      const mime = getMimeForFormat(outputExt);
-      const blob = new Blob([data as any], { type: mime });
-
-      // Clean up virtual files
-      try {
-        await this.ffmpeg.deleteFile(inputName);
-        await this.ffmpeg.deleteFile(outputName);
-      } catch (cleanupErr) {
-        // ignore delete errors
-      }
-
-      onProgress?.(100);
-      return blob;
-    } finally {
-      this.ffmpeg.off('progress', progressHandler);
-      await Promise.allSettled([this.ffmpeg.deleteFile(inputName), this.ffmpeg.deleteFile(outputName)]);
-    }
-  }
-
-  /**
-   * Execute audio conversion locally using FFmpeg.wasm
-   */
-  public async convertAudioWithFFmpeg(
-    file: File,
-    targetFormat: string,
-    options?: {
-      bitrate?: number;
-      sampleRate?: number;
-      channels?: 1 | 2;
-      startTime?: number;
-      endTime?: number;
-    },
-    onProgress?: (progressPercent: number) => void
-  ): Promise<Blob> {
-    return this.serialize(() => this.runAudioConversion(file, targetFormat, options, onProgress));
-  }
-
-  public audioToVideo(file: File, format: string, options: {videoBitrate?: number; fps?: number}, onProgress?: (percent:number)=>void): Promise<Blob> {
-    return this.serialize(async () => {
-      if (!['mp4','webm'].includes(format)) throw new Error('Pilih MP4 atau WebM untuk audio ke video.');
-      if (!(await this.load()) || !this.ffmpeg) throw new Error('Mesin video belum tersedia. Periksa koneksi lalu coba lagi.');
-      const input = `audio_${Date.now()}.${file.name.split('.').pop() || 'wav'}`;
-      const output = `video_${Date.now()}.${format}`;
-      const engine = this.ffmpeg;
-      const progress = ({progress}:{progress:number}) => onProgress?.(Math.min(99,Math.max(5,Math.round(progress*100))));
-      engine.on('progress',progress);
-      try {
-        await engine.writeFile(input,await fetchFile(file));
-        const codec = format === 'mp4' ? ['-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-c:a','aac'] : ['-c:v','libvpx','-deadline','realtime','-c:a','libopus'];
-        const code = await engine.exec(['-y','-f','lavfi','-i',`color=c=0x211a38:s=1280x720:r=${options.fps || 30}`,'-i',input,'-map','0:v:0','-map','1:a:0',...codec,'-b:v',String(options.videoBitrate || 2500000),'-b:a','192k','-shortest',output]);
-        if (code !== 0) throw new Error('Audio tidak dapat dibuat menjadi video. Periksa format sumber.');
-        const blob = new Blob([await engine.readFile(output) as any],{type:getMimeForFormat(format)});
-        onProgress?.(100);
-        return blob;
-      } finally {
-        engine.off('progress',progress);
-        await Promise.allSettled([engine.deleteFile(input),engine.deleteFile(output)]);
-      }
-    });
-  }
-
-  private async runAudioConversion(
-    file: File,
-    targetFormat: string,
-    options?: {
-      bitrate?: number;
-      sampleRate?: number;
-      channels?: 1 | 2;
-      startTime?: number;
-      endTime?: number;
-    },
-    onProgress?: (progressPercent: number) => void
-  ): Promise<Blob> {
-    const isLoaded = await this.load();
-    if (!isLoaded || !this.ffmpeg) {
-      throw new Error('FFmpeg WebAssembly is not available');
-    }
-
-    const inputName = `input_${Date.now()}.${file.name.split('.').pop() || 'mp3'}`;
-    const outputExt = targetFormat.toLowerCase();
-    const outputName = `output_${Date.now()}.${outputExt}`;
-
-    onProgress?.(5);
-
-    const progressHandler = ({ progress }: { progress: number }) => {
-      const pct = Math.min(99, Math.max(5, Math.round(progress * 100)));
-      onProgress?.(pct);
-    };
-
-    this.ffmpeg.on('progress', progressHandler);
-
-    try {
-      const fileData = await fetchFile(file);
-      await this.ffmpeg.writeFile(inputName, fileData);
-
-      const args: string[] = ['-y', '-i', inputName, '-vn'];
-
-      if (typeof options?.startTime === 'number' && options.startTime > 0) {
-        args.push('-ss', options.startTime.toString());
-      }
-      if (typeof options?.endTime === 'number' && options.endTime > 0) {
-        args.push('-to', options.endTime.toString());
-      }
-
-      if (options?.bitrate) {
-        args.push('-b:a', `${options.bitrate}k`);
-      }
-      if (options?.sampleRate) {
-        args.push('-ar', options.sampleRate.toString());
-      }
-      if (options?.channels) {
-        args.push('-ac', options.channels.toString());
-      }
-
-      args.push(outputName);
-
-      const exitCode = await this.ffmpeg.exec(args);
-      if (exitCode !== 0) throw new Error('Conversion failed. The source or requested codec may not be supported.');
-
-      const data = await this.ffmpeg.readFile(outputName);
-      const mime = getAudioMimeForFormat(outputExt);
-      const blob = new Blob([data as any], { type: mime });
-
-      try {
-        await this.ffmpeg.deleteFile(inputName);
-        await this.ffmpeg.deleteFile(outputName);
-      } catch (cleanupErr) {
-        // ignore
-      }
-
-      onProgress?.(100);
-      return blob;
-    } finally {
-      this.ffmpeg.off('progress', progressHandler);
-      await Promise.allSettled([this.ffmpeg.deleteFile(inputName), this.ffmpeg.deleteFile(outputName)]);
-    }
-  }
+  if(!await this.load()||!this.ffmpeg)throw Error('Engine konversi tidak dapat dimuat. Pastikan folder ffmpeg ikut dalam build; jalankan npm run build lalu buka aplikasi melalui HTTP.');
+  const engine=this.ffmpeg;
+  const progress=({progress}:{progress:number})=>onProgress?.(Math.min(99,Math.max(1,Math.round(progress*100))));
+  this.logs=[];engine.on('progress',progress);
+  try{
+   onProgress?.(1);await engine.writeFile(input,await fetchFile(file));
+   const code=await engine.exec(args);
+   if(code!==0)throw Error('Conversion failed: '+this.logs.slice(-6).join('\n'));
+   const bytes=await engine.readFile(output);if(!bytes.length)throw Error('Encoder menghasilkan berkas kosong.');
+   onProgress?.(100);return new Blob([bytes as BlobPart],{type:(kind==='audio'?audioProfiles[format]:videoProfiles[format]).mime});
+  }catch(error){
+   if(/memory|Aborted|out of bounds/i.test(String(error))){engine.terminate();this.ffmpeg=null;this.status='error';}
+   throw error;
+  }finally{engine.off('progress',progress);if(this.ffmpeg===engine)await Promise.allSettled([engine.deleteFile(input),engine.deleteFile(output)]);}
+ }
+ public convertAudioWithFFmpeg(file:File,format:string,options:AudioOptions={},progress?:(n:number)=>void){return this.serialize(()=>this.convert(file,'audio',format,options,progress));}
+ public convertVideoWithFFmpeg(file:File,format:string,options:VideoOptions={},progress?:(n:number)=>void){return this.serialize(()=>this.convert(file,'video',format,options,progress));}
+ public audioToVideo(file:File,format:string,options:VideoOptions={},progress?:(n:number)=>void){return this.serialize(()=>this.convert(file,'audio-video',format,options,progress));}
 }
-
-function getMimeForFormat(ext: string): string {
-  switch (ext) {
-    case 'mp4': return 'video/mp4';
-    case 'webm': return 'video/webm';
-    case 'mkv': return 'video/x-matroska';
-    case 'avi': return 'video/x-msvideo';
-    case 'mov': return 'video/quicktime';
-    case 'gif': return 'image/gif';
-    default: return 'application/octet-stream';
-  }
-}
-
-function getAudioMimeForFormat(ext: string): string {
-  switch (ext) {
-    case 'mp3': return 'audio/mpeg';
-    case 'm4a': return 'audio/mp4';
-    case 'wav': return 'audio/wav';
-    case 'aac': return 'audio/aac';
-    case 'ogg': return 'audio/ogg';
-    case 'flac': return 'audio/flac';
-    case 'opus': return 'audio/opus';
-    default: return 'application/octet-stream';
-  }
-}
-
-export const ffmpegService = new FFmpegService();
+export const ffmpegService=new FFmpegService();

@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import {useObjectUrls} from '../../services/useObjectUrls';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   RotateCw,
@@ -22,6 +24,10 @@ export const ImageToPdf: React.FC = () => {
   const [progress, setProgress] = useState<number>(0);
   const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const { addHistoryItem } = useHistory();
+
+  useObjectUrls(items.map(item=>item.previewUrl));
+
+  useEffect(()=>{setPdfBlob(null);},[items,pageSize,orientation,marginMm]);
 
   const handleFiles = (files: File[]) => {
     const newItems: ImageToPdfItem[] = files.map((file) => ({
@@ -84,7 +90,7 @@ export const ImageToPdf: React.FC = () => {
         category: 'document',
       });
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsExporting(false);
     }
   };
@@ -92,15 +98,17 @@ export const ImageToPdf: React.FC = () => {
   const downloadPdf = () => {
     if (!pdfBlob) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(pdfBlob);
+    const downloadUrl = URL.createObjectURL(pdfBlob);
+    a.href = downloadUrl;
     a.download = `MediaForge_Document_${Date.now()}.pdf`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isExporting} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/10 text-red-500">
           <FileText size={20} />
@@ -268,6 +276,6 @@ export const ImageToPdf: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Scaling, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { convertImage, loadImageFromFile } from '../../services/imageProcessor';
@@ -11,6 +12,8 @@ export const ImageResizer: React.FC = () => {
   const [keepAspect, setKeepAspect] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [resultBlob, setResultBlob] = useState<Blob | null>(null);
+
+  useEffect(()=>{setResultBlob(null);},[file,targetWidth,targetHeight,keepAspect]);
 
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
@@ -47,7 +50,7 @@ export const ImageResizer: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -55,15 +58,17 @@ export const ImageResizer: React.FC = () => {
   const downloadImage = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_${targetWidth}x${targetHeight}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
           <Scaling size={20} />
@@ -103,7 +108,7 @@ export const ImageResizer: React.FC = () => {
           {/* Quick Preset Buttons */}
           <div className="space-y-1.5">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Quick Scale:</span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {[
                 { label: '25%', scale: 0.25 },
                 { label: '50%', scale: 0.5 },
@@ -196,6 +201,6 @@ export const ImageResizer: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

@@ -1,7 +1,7 @@
 {
   "name": "mediaforge",
   "private": true,
-  "version": "1.7.3",
+  "version": "1.8.3",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=127.0.0.1",
@@ -10,20 +10,23 @@
     "clean": "node scripts/clean.cjs",
     "lint": "tsc --noEmit",
     "check": "npm run lint && npm run build",
-    "test": "node --import tsx tests/core-regressions.ts && node --test tests/desktop-regressions.cjs tests/server-regressions.cjs",
+    "test": "node --import tsx tests/core-regressions.ts && node --test tests/desktop-regressions.cjs tests/server-regressions.cjs tests/media-burner-regressions.cjs tests/url-native-regressions.cjs",
     "start": "node server.js",
     "dev:api": "node server.js",
     "desktop": "electron .",
-    "package:win": "npm run prepare:desktop && electron-builder --win nsis --x64 --publish never",
-    "package:win:portable": "npm run prepare:desktop && electron-builder --win portable --x64 --publish never",
+    "package:win": "node scripts/verify-windows-tools.cjs && npm run prepare:desktop && electron-builder --win nsis --x64 --publish never",
+    "package:win:portable": "node scripts/verify-windows-tools.cjs && npm run prepare:desktop && electron-builder --win portable --x64 --publish never",
     "prepare:desktop": "npm run build && node scripts/stage-windows-app.cjs && npm ci --prefix .mediaforge-app --omit=dev --ignore-scripts --no-audit --no-fund && node scripts/verify-stage.cjs",
-    "verify:electron": "node scripts/verify-electron.cjs"
+    "verify:electron": "node scripts/verify-electron.cjs",
+    "prebuild": "node scripts/stage-ffmpeg-core.cjs",
+    "predev": "node scripts/stage-ffmpeg-core.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
+    "@ffmpeg/core": "0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@tailwindcss/vite": "^4.3.3",
@@ -37,6 +40,7 @@
     "jspdf": "^4.2.1",
     "jszip": "^3.10.2",
     "lucide-react": "^0.546.0",
+    "mediabunny": "1.61.2",
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
@@ -58,15 +62,25 @@
       "dist/**/*",
       "desktop/**/*",
       "server.js",
-      "package.json"
+      "package.json",
+      "shared/**/*"
     ],
     "extraResources": [
       {
         "from": "vendor/win/bin",
         "to": "bin",
         "filter": [
-          "**/*.exe"
+          "**/*.exe",
+          "**/*.dll"
         ]
+      },
+      {
+        "from": "desktop/optical.ps1",
+        "to": "optical/optical.ps1"
+      },
+      {
+        "from": "vendor/win/licenses",
+        "to": "licenses"
       }
     ],
     "directories": {

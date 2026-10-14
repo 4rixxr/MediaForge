@@ -1,3 +1,5 @@
+import {mediaFileCategory} from '../../services/mediaFileType';
+import {audioProfiles,audioRates,videoProfiles} from '../../../shared/media-profiles.js';
 import {useLanguage} from '../../context/LanguageContext';
 import React, {useRef, useState} from 'react';
 import {ArrowRightLeft, AudioLines, Check, CheckCircle2, Clapperboard, Download, FileAudio, FileVideo, FolderOpen, HardDrive, LoaderCircle, Music2, Pause, Play, Plus, RotateCcw, Sparkles, Trash2, UploadCloud, WandSparkles, X} from 'lucide-react';
@@ -15,16 +17,13 @@ const modes = [
 ] as const;
 const sizes=(bytes:number)=>bytes===0?'0 MB':bytes<1024**2?`${(bytes/1024).toFixed(1)} KB`:`${(bytes/1024**2).toFixed(1)} MB`;
 const statuses:Record<QueueJob['status'],string>={waiting:'Menunggu',processing:'Diproses',completed:'Selesai',failed:'Gagal',cancelled:'Dibatalkan'};
-const matchesMode=(file:File,mode:ConversionMode)=>{
-  const ext=file.name.split('.').pop()?.toLowerCase()||'';
-  return mode.startsWith('audio') ? file.type.startsWith('audio/')||['mp3','wav','aac','flac','m4a','ogg','opus','aiff'].includes(ext) : file.type.startsWith('video/')||['mp4','webm','mkv','mov','avi','m4v','ts'].includes(ext);
-};
+const matchesMode=(file:File,mode:ConversionMode)=>mediaFileCategory(file)===(mode.startsWith('audio')?'audio':'video');
 
-export function ConverterWorkspace() {
+export function ConverterWorkspace({initialMode='audio-audio'}:{initialMode?:ConversionMode}={}) {
   const {t,language}=useLanguage();
   const {jobs,addJobs,startJob,startAllWaitingJobs,pauseQueue,isQueuePaused,isProcessingAny,removeJob,clearCompletedJobs,downloadJobOutput,downloadAllCompletedAsZip}=useQueue();
   const {history}=useHistory();
-  const [mode,setMode]=useState<ConversionMode>('audio-audio');
+  const [mode,setMode]=useState<ConversionMode>(initialMode);
   const [format,setFormat]=useState('mp3');
   const [quality,setQuality]=useState('192');
   const [channels,setChannels]=useState('2');
@@ -37,7 +36,8 @@ export function ConverterWorkspace() {
   const input=useRef<HTMLInputElement>(null);
   const isAudioOutput=mode.endsWith('audio');
   const audioInput=mode.startsWith('audio');
-  const lossless=format==='wav'||format==='flac';
+  const profile=audioProfiles[format];
+  const lossless=!!profile?.lossless;
   const completed=jobs.filter(j=>j.status==='completed');
   const processing=jobs.filter(j=>j.status==='processing');
   const waiting=jobs.filter(j=>j.status==='waiting');
@@ -45,7 +45,7 @@ export function ConverterWorkspace() {
   const today=new Date().toDateString();
   const todaysHistory=history.filter(h=>new Date(h.timestamp).toDateString()===today);
   const sourceSize=jobs.reduce((n,j)=>n+j.fileSize,0)+files.reduce((n,f)=>n+f.size,0);
-  const formats=isAudioOutput?['mp3','wav','aac','flac','m4a','ogg','opus']:mode==='audio-video'?['mp4','webm']:['mp4','webm','mkv','mov','avi'];
+  const formats=isAudioOutput?Object.keys(audioProfiles):mode==='audio-video'?['mp4','webm']:Object.keys(videoProfiles).filter(f=>f!=='gif');
   const selectMode=(next:ConversionMode)=>{
     if(next===mode)return;
     const kept=files.filter(f=>matchesMode(f,next));
@@ -63,7 +63,7 @@ export function ConverterWorkspace() {
   };
   const convert=()=>{
     if(files.length){
-      addJobs(files,format,{mode,bitrate:isAudioOutput&&!lossless?Number(quality):undefined,channels:isAudioOutput?Number(channels) as 1|2:undefined,videoBitrate:!isAudioOutput?Number(quality)*1000:undefined,fps:!isAudioOutput?Number(fps):undefined});
+      addJobs(files,format,{mode,bitrate:isAudioOutput&&!lossless&&!profile?.quality?Number(quality):undefined,quality:profile?.quality?Number(quality):undefined,channels:isAudioOutput?Number(channels) as 1|2:undefined,videoBitrate:!isAudioOutput?Number(quality)*1000:undefined,fps:!isAudioOutput?Number(fps):undefined});
       setFiles([]);setFilter('all');
     }
     void startAllWaitingJobs();
@@ -98,15 +98,16 @@ export function ConverterWorkspace() {
               <UploadCloud size={21} strokeWidth={1.3}/><strong>{files.length?t('{count} berkas siap dikonversi',{count:files.length}):t('Tarik berkas ke sini')}</strong>
               <p>{t(audioInput?'Format audio: MP3, WAV, AAC, FLAC, M4A':'Format video: MP4, WEBM, MKV, MOV, AVI')}</p>
               <div><button className="cv-button cv-primary" onClick={()=>input.current?.click()}><FolderOpen size={13}/>{t('Pilih berkas')}</button><button className="cv-button" disabled={makingSample} onClick={()=>void addSample()}>{makingSample?<LoaderCircle size={13} className="cv-spin"/>:<Sparkles size={13}/>}Contoh berkas</button></div>
-              <input ref={input} type="file" aria-label="Pilih berkas media" accept={audioInput?'audio/*,.mp3,.wav,.aac,.flac,.m4a,.ogg,.opus,.aiff':'video/*,.mp4,.webm,.mkv,.mov,.avi,.m4v,.ts'} multiple hidden onChange={e=>{addFiles(Array.from(e.target.files||[]));e.target.value='';}}/>
+              <input ref={input} type="file" aria-label="Pilih berkas media" accept={audioInput?'audio/*,.mp3,.wav,.aac,.flac,.m4a,.ogg,.opus,.aiff,.aif,.wma':'video/*,.mp4,.webm,.mkv,.mov,.avi,.m4v,.ts,.mpg,.mpeg,.mpeg2,.dat,.wmv'} multiple hidden onChange={e=>{addFiles(Array.from(e.target.files||[]));e.target.value='';}}/>
             </div>
             {files.length>0&&<ul className="cv-selected-files" aria-label="Berkas terpilih">{files.map((f,i)=><li key={`${f.name}-${i}`}><span title={f.name}>{f.name}</span><small>{sizes(f.size)}</small><button aria-label={`Hapus pilihan ${f.name}`} onClick={()=>setFiles(value=>value.filter((_,n)=>n!==i))}><X size={13}/></button></li>)}</ul>}
             <p className="cv-privacy">{t('Berkas diproses di perangkat kamu.')}<br/>{t('Konversi dan antrean berjalan secara lokal.')}</p>
           </div>
           <div className="cv-settings">
-            <label className="cv-format-label">{t('Format keluaran')}<select aria-label="Format keluaran" value={format} onChange={e=>setFormat(e.target.value)}>{formats.map(f=><option key={f} value={f}>{f.toUpperCase()}{f==='wav'?' · '+t('audio tanpa kompresi'):f==='flac'?' · lossless':''}</option>)}</select></label>
-            <div className="cv-settings-row"><label>{t('Kualitas')}<select aria-label="Kualitas" value={lossless?'lossless':quality} disabled={lossless} onChange={e=>setQuality(e.target.value)}>{lossless?<option value="lossless">{format==='wav'?'PCM 16-bit':'Lossless'}</option>:isAudioOutput?[128,192,256,320].map(n=><option value={n} key={n}>{n} kbps</option>):[1500,2500,5000,8000].map(n=><option value={n} key={n}>{n/1000} Mbps</option>)}</select></label>{isAudioOutput?<label>{t('Kanal')}<select aria-label="Kanal" value={channels} onChange={e=>setChannels(e.target.value)}><option value="2">{t('Stereo')}</option><option value="1">{t('Mono')}</option></select></label>:<label>{t('Frame rate')}<select aria-label="Frame rate" value={fps} onChange={e=>setFps(e.target.value)}>{[24,25,30,60].map(n=><option value={n} key={n}>{n} fps</option>)}</select></label>}</div>
+            <label className="cv-format-label">{t('Format keluaran')}<select aria-label="Format keluaran" value={format} onChange={e=>{setFormat(e.target.value);setQuality(String(isAudioOutput?audioProfiles[e.target.value].default:2500));}}>{formats.map(f=><option key={f} value={f}>{isAudioOutput?f.toUpperCase():videoProfiles[f].label}{f==='wav'?' · '+t('audio tanpa kompresi'):f==='flac'?' · lossless':''}</option>)}</select></label>
+            <div className="cv-settings-row"><label>{t('Kualitas')}<select aria-label="Kualitas" value={format==='dat'?'vcd':lossless?'lossless':quality} disabled={lossless||format==='dat'} onChange={e=>setQuality(e.target.value)}>{format==='dat'?<option value="vcd">VCD PAL · fixed</option>:lossless?<option value="lossless">{format==='wav'?'PCM 16-bit':'Lossless'}</option>:isAudioOutput?audioRates(format,Number(channels)).map((n:number)=><option value={n} key={n}>{profile.quality?`Vorbis Q${n} · VBR`:`${n} kbps${format==='opus'?' · VBR target':''}`}</option>):[1500,2500,5000,8000].map(n=><option value={n} key={n}>{n/1000} Mbps</option>)}</select></label>{isAudioOutput?<label>{t('Kanal')}<select aria-label="Kanal" value={channels} onChange={e=>{setChannels(e.target.value);const rates=audioRates(format,Number(e.target.value));if(!lossless&&!rates.includes(Number(quality)))setQuality(String(rates.at(-1)));}}><option value="2">{t('Stereo')}</option><option value="1">{t('Mono')}</option></select></label>:<label>{t('Frame rate')}<select aria-label="Frame rate" disabled={format==='dat'||format==='mpeg'||format==='mpeg2'} value={['dat','mpeg','mpeg2'].includes(format)?'25':fps} onChange={e=>setFps(e.target.value)}>{[24,25,30,60].map(n=><option value={n} key={n}>{n} fps</option>)}</select></label>}</div>
             <div className="cv-summary"><p><span>{t('Berkas siap')}</span><strong>{t('{count} berkas',{count:files.length})}</strong></p><p><span>{t('Perkiraan ukuran hasil')}</span><span>{files.length?t('Setelah pemrosesan'):'—'}</span></p><p><span>{t('Estimasi waktu')}</span><span>{files.length?t('Bergantung perangkat'):'—'}</span></p></div>
+            {format==='dat'&&<p className="cv-option-note">DAT: MPEG-1 PAL 352×288, 25 fps, video 1150 kbps + MP2 224 kbps. Berkas stream; gunakan VCD Burner untuk cakram yang dapat diputar sebagai VCD.</p>}
             {mode==='audio-video'&&<p className="cv-option-note">{t('Video 720p dengan latar polos dan audio pilihanmu.')}</p>}
             <div className="cv-settings-actions"><button className="cv-button cv-reset" onClick={reset}><RotateCcw size={13}/>{t('Reset pengaturan')}</button><button className="cv-button cv-primary" disabled={!files.length} onClick={convert}><Play size={13}/>{t('Konversi sekarang')}</button></div>
           </div>

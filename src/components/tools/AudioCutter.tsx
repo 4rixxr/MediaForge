@@ -1,7 +1,8 @@
+import {reportToolError} from '../../services/toolErrors';
 import React, { useState, useRef, useEffect } from 'react';
 import { Sliders, Play, Pause, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
-import { cutAudio, decodeAudioFile } from '../../services/audioProcessor';
+import { cutAudio, decodeAudioFile, audioBufferToWav } from '../../services/audioProcessor';
 
 export const AudioCutter: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -16,6 +17,10 @@ export const AudioCutter: React.FC = () => {
 
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  useEffect(()=>{setResultBlob(null);},[file,startTime,endTime]);
+
+  useEffect(()=>()=>{if(audioUrl)URL.revokeObjectURL(audioUrl);},[audioUrl]);
+
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
@@ -28,7 +33,7 @@ export const AudioCutter: React.FC = () => {
     setStartTime(0);
     setEndTime(dur);
     setCurrentTime(0);
-    setAudioUrl(URL.createObjectURL(f));
+    setAudioUrl(URL.createObjectURL(audioBufferToWav(buf)));
   };
 
   const formatSeconds = (sec: number) => {
@@ -59,8 +64,7 @@ export const AudioCutter: React.FC = () => {
       if (audioRef.current.currentTime < startTime || audioRef.current.currentTime >= endTime) {
         audioRef.current.currentTime = startTime;
       }
-      audioRef.current.play();
-      setIsPlaying(true);
+      audioRef.current.play().then(()=>setIsPlaying(true)).catch(reportToolError);
     }
   };
 
@@ -73,7 +77,7 @@ export const AudioCutter: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -81,15 +85,17 @@ export const AudioCutter: React.FC = () => {
   const downloadCut = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_cut.wav`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500">
           <Sliders size={20} />
@@ -240,6 +246,6 @@ export const AudioCutter: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

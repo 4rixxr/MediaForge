@@ -1,6 +1,7 @@
 import { ToolDef } from '../types/media';
 
 export const TOOLS_LIST: ToolDef[] = [
+  {id:'burner',name:'VCD / CD / DVD Burner',category:'tools',description:'Create disc images and write supported media with a detected recorder.',iconName:'Disc3'},
   { id: 'url-downloader', name: 'URL Downloader', category: 'tools', description: 'Download publicly accessible, permitted media from supported video URLs.', iconName: 'Download', popular: true },
   // Video tools
   {
@@ -166,8 +167,8 @@ export const TOOLS_LIST: ToolDef[] = [
   },
   {
     id: 'file-converter',
-    name: 'File Converter',
-    category: 'document',
+    name: 'Audio / Video Converter',
+    category: 'tools',
     description: 'Add media files directly to your conversion queue.',
     iconName: 'ArrowLeftRight',
   },

@@ -1,4 +1,5 @@
-import React, { useState, useRef } from 'react';
+import {audioProfiles,audioRates} from '../../../shared/media-profiles.js';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Music,
   Play,
@@ -12,13 +13,13 @@ import {
 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { PrivacyIndicator } from '../common/PrivacyIndicator';
-import { convertAudio, decodeAudioFile } from '../../services/audioProcessor';
+import { convertAudio, decodeAudioFile, audioBufferToWav } from '../../services/audioProcessor';
 import { useHistory } from '../../context/HistoryContext';
 
 export const AudioConverter: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [targetFormat, setTargetFormat] = useState<'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg' | 'opus'>('mp3');
+  const [targetFormat, setTargetFormat] = useState<'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg' | 'opus' | 'wma'>('mp3');
   const [bitrate, setBitrate] = useState<number>(320);
   const [sampleRate, setSampleRate] = useState<number>(44100);
   const [channels, setChannels] = useState<1 | 2>(2);
@@ -38,7 +39,11 @@ export const AudioConverter: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const { addHistoryItem } = useHistory();
 
-  const formats = ['MP3', 'WAV', 'FLAC', 'AAC', 'M4A', 'OGG', 'OPUS'];
+  const formats = Object.keys(audioProfiles).map(f=>f.toUpperCase());
+  const profile=audioProfiles[targetFormat];
+  const [error,setError]=useState('');
+
+  useEffect(()=>()=>{if(audioUrl)URL.revokeObjectURL(audioUrl);},[audioUrl]);
 
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
@@ -49,20 +54,25 @@ export const AudioConverter: React.FC = () => {
     setMetaTitle(f.name.replace(/\.[^/.]+$/, ''));
   };
 
-  const togglePlayback = () => {
+  const togglePlayback = async () => {
     if (!audioRef.current) return;
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      const element=audioRef.current,previous=element.src;
+      try{await element.play();setIsPlaying(true);}
+      catch{
+        if(!file)return;
+        try{const buffer=await decodeAudioFile(file);if(audioRef.current!==element||element.src!==previous)return;const url=URL.createObjectURL(audioBufferToWav(buffer));setAudioUrl(url);element.src=url;await element.play();setIsPlaying(true);}
+        catch(error){setError(error instanceof Error?error.message:'Preview audio gagal.');}
+      }
     }
   };
 
   const runConvert = async () => {
     if (!file) return;
-    setIsConverting(true);
+    setError('');setResultBlob(null);setIsConverting(true);
     setProgress(10);
 
     try {
@@ -70,7 +80,9 @@ export const AudioConverter: React.FC = () => {
         file,
         {
           format: targetFormat.toLowerCase() as any,
-          bitrate,
+          bitrate:profile.quality||profile.lossless?undefined:bitrate,
+          quality:profile.quality?bitrate:undefined,
+          metadata:{title:metaTitle,artist:metaArtist,album:metaAlbum,genre:metaGenre,date:metaYear},
           sampleRate,
           channels,
           volume,
@@ -91,7 +103,7 @@ export const AudioConverter: React.FC = () => {
         category: 'audio',
       });
     } catch (e) {
-      console.error(e);
+      setError(e instanceof Error?e.message:String(e));
       setIsConverting(false);
     }
   };
@@ -99,11 +111,13 @@ export const AudioConverter: React.FC = () => {
   const downloadAudio = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${metaTitle || file.name.replace(/\.[^/.]+$/, '')}.${targetFormat.toLowerCase()}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
@@ -115,12 +129,13 @@ export const AudioConverter: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Audio Converter</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Transcode audio files with bitrate tuning, channel mixing, volume boost, and ID3 metadata tags.
+            Transcode audio files with bitrate tuning, channel mixing, volume boost, and metadata where supported by the selected container.
           </p>
         </div>
       </div>
 
       <PrivacyIndicator />
+      {error&&<p className="studio-notice" role="alert">{error}</p>}
 
       {!file ? (
         <DropZone
@@ -169,7 +184,7 @@ export const AudioConverter: React.FC = () => {
               {formats.map((fmt) => (
                 <button
                   key={fmt}
-                  onClick={() => setTargetFormat(fmt.toLowerCase() as any)}
+                  onClick={() => {const f=fmt.toLowerCase();setTargetFormat(f as any);setBitrate(audioProfiles[f].default);setSampleRate(f==='opus'?48000:44100);setResultBlob(null);}}
                   className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
                     targetFormat.toUpperCase() === fmt
                       ? 'bg-indigo-600 text-white shadow-xs'
@@ -187,15 +202,12 @@ export const AudioConverter: React.FC = () => {
             <div>
               <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">Bitrate</label>
               <select
-                value={bitrate}
-                onChange={(e) => setBitrate(Number(e.target.value))}
+                value={profile.lossless?0:bitrate}
+                disabled={!!profile.lossless}
+                onChange={(e) => {setBitrate(Number(e.target.value));setResultBlob(null);}}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-slate-100"
               >
-                <option value={320}>320 kbps (Very High)</option>
-                <option value={256}>256 kbps (High)</option>
-                <option value={192}>192 kbps (Standard)</option>
-                <option value={128}>128 kbps (Good)</option>
-                <option value={96}>96 kbps (Compact)</option>
+                {profile.lossless?<option value={0}>{targetFormat==='wav'?'PCM 16-bit · tanpa bitrate lossy':'FLAC · lossless'}</option>:audioRates(targetFormat,channels,sampleRate).map((n:number)=><option key={n} value={n}>{profile.quality?`Vorbis Q${n} · VBR`:`${n} kbps${targetFormat==='opus'?' · VBR target':''}`}</option>)}
               </select>
             </div>
 
@@ -203,13 +215,10 @@ export const AudioConverter: React.FC = () => {
               <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">Sample Rate</label>
               <select
                 value={sampleRate}
-                onChange={(e) => setSampleRate(Number(e.target.value))}
+                onChange={(e) => {setSampleRate(Number(e.target.value));setResultBlob(null);}}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-slate-100"
               >
-                <option value={48000}>48,000 Hz (Studio)</option>
-                <option value={44100}>44,100 Hz (CD Standard)</option>
-                <option value={32000}>32,000 Hz (Broadcast)</option>
-                <option value={22050}>22,050 Hz (Low Bandwidth)</option>
+                {profile.samples.map((n:number)=><option value={n} key={n}>{n.toLocaleString()} Hz</option>)}
               </select>
             </div>
 
@@ -217,7 +226,7 @@ export const AudioConverter: React.FC = () => {
               <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">Channels</label>
               <select
                 value={channels}
-                onChange={(e) => setChannels(Number(e.target.value) as any)}
+                onChange={(e) => {setChannels(Number(e.target.value) as any);const rates=audioRates(targetFormat,Number(e.target.value),sampleRate);if(!profile.lossless&&!rates.includes(bitrate))setBitrate(rates.at(-1)!);setResultBlob(null);}}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-slate-100"
               >
                 <option value={2}>Stereo (2 Channels)</option>
@@ -240,7 +249,7 @@ export const AudioConverter: React.FC = () => {
               max="2.0"
               step="0.05"
               value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
+              onChange={(e) => {setVolume(Number(e.target.value));setResultBlob(null);}}
               className="w-full accent-indigo-600"
             />
           </div>
@@ -252,7 +261,7 @@ export const AudioConverter: React.FC = () => {
               className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-indigo-600"
             >
               <Tag size={13} />
-              <span>{showMetadata ? 'Hide ID3 Metadata Editor' : 'Edit ID3 Metadata (Title, Artist, Album)'}</span>
+              <span>{showMetadata ? 'Hide Metadata Editor' : 'Edit Metadata (Title, Artist, Album)'}</span>
             </button>
 
             {showMetadata && (
@@ -262,7 +271,7 @@ export const AudioConverter: React.FC = () => {
                   <input
                     type="text"
                     value={metaTitle}
-                    onChange={(e) => setMetaTitle(e.target.value)}
+                    onChange={(e) => {setMetaTitle(e.target.value);setResultBlob(null);}}
                     className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2"
                   />
                 </div>
@@ -271,7 +280,7 @@ export const AudioConverter: React.FC = () => {
                   <input
                     type="text"
                     value={metaArtist}
-                    onChange={(e) => setMetaArtist(e.target.value)}
+                    onChange={(e) => {setMetaArtist(e.target.value);setResultBlob(null);}}
                     placeholder="e.g. MediaForge Artist"
                     className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2"
                   />
@@ -281,7 +290,7 @@ export const AudioConverter: React.FC = () => {
                   <input
                     type="text"
                     value={metaAlbum}
-                    onChange={(e) => setMetaAlbum(e.target.value)}
+                    onChange={(e) => {setMetaAlbum(e.target.value);setResultBlob(null);}}
                     placeholder="e.g. Mastered Mix"
                     className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2"
                   />
@@ -291,7 +300,7 @@ export const AudioConverter: React.FC = () => {
                   <input
                     type="text"
                     value={metaGenre}
-                    onChange={(e) => setMetaGenre(e.target.value)}
+                    onChange={(e) => {setMetaGenre(e.target.value);setResultBlob(null);}}
                     placeholder="e.g. Electronic"
                     className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2"
                   />
@@ -301,7 +310,7 @@ export const AudioConverter: React.FC = () => {
                   <input
                     type="text"
                     value={metaYear}
-                    onChange={(e) => setMetaYear(e.target.value)}
+                    onChange={(e) => {setMetaYear(e.target.value);setResultBlob(null);}}
                     placeholder="2026"
                     className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2"
                   />

@@ -1,3 +1,4 @@
+import {reportToolError} from '../../services/toolErrors';
 import React, { useState, useRef, useEffect } from 'react';
 import { Crop, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
@@ -7,7 +8,7 @@ export const VideoCropper: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoDims, setVideoDims] = useState<{ width: number; height: number } | null>(null);
-  const [cropPreset, setCropPreset] = useState<'16:9' | '4:3' | '1:1' | '9:16' | '21:9' | 'custom'>('16:9');
+  const [cropPreset, setCropPreset] = useState<'16:9' | '4:3' | '1:1' | '9:16' | '21:9' | 'custom'>('custom');
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 640, height: 360 });
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -15,20 +16,25 @@ export const VideoCropper: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  useEffect(()=>{setResultBlob(null);},[file,cropRect]);
+
+  useEffect(()=>()=>{if(videoUrl)URL.revokeObjectURL(videoUrl);},[videoUrl]);
+
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
     setFile(f);
     setResultBlob(null);
 
-    const { video, cleanup } = await loadVideoElement(f);
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
+    const { video, cleanup, preview } = await loadVideoElement(f);
+    const w = video.videoWidth;
+    const h = video.videoHeight;
     setVideoDims({ width: w, height: h });
-    setCropRect({ x: 0, y: 0, width: Math.round(w * 0.8), height: Math.round(h * 0.8) });
+    setCropPreset('custom');
+    setCropRect({x:0,y:0,width:Math.floor(w/2)*2,height:Math.floor(h/2)*2});
     cleanup();
 
-    setVideoUrl(URL.createObjectURL(f));
+    setVideoUrl(URL.createObjectURL(preview));
   };
 
   const applyPreset = (preset: '16:9' | '4:3' | '1:1' | '9:16' | '21:9' | 'custom') => {
@@ -58,6 +64,7 @@ export const VideoCropper: React.FC = () => {
       targetW = Math.round((targetH * 21) / 9);
     }
 
+    targetW=Math.floor(targetW/2)*2;targetH=Math.floor(targetH/2)*2;
     const offsetX = Math.round((maxW - targetW) / 2);
     const offsetY = Math.round((maxH - targetH) / 2);
     setCropRect({ x: offsetX, y: offsetY, width: targetW, height: targetH });
@@ -81,7 +88,7 @@ export const VideoCropper: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -89,15 +96,17 @@ export const VideoCropper: React.FC = () => {
   const downloadCropped = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_cropped.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
           <Crop size={20} />
@@ -105,7 +114,7 @@ export const VideoCropper: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Video Cropper</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Cut out unwanted outer borders or adjust frame aspect ratio with visual area previews.
+            Cut out unwanted outer borders or adjust frame aspect ratio with pixel coordinates and a source preview.
           </p>
         </div>
       </div>
@@ -239,6 +248,6 @@ export const VideoCropper: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

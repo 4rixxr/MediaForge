@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Zap, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { convertImage } from '../../services/imageProcessor';
@@ -8,6 +9,8 @@ export const ImageToWebP: React.FC = () => {
   const [quality, setQuality] = useState<number>(85);
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultBlob, setResultBlob] = useState<Blob | null>(null);
+
+  useEffect(()=>{setResultBlob(null);},[file,quality]);
 
   const handleFile = (files: File[]) => {
     if (!files[0]) return;
@@ -28,7 +31,7 @@ export const ImageToWebP: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -36,15 +39,17 @@ export const ImageToWebP: React.FC = () => {
   const downloadWebP = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}.webp`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
           <Zap size={20} />
@@ -122,6 +127,6 @@ export const ImageToWebP: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

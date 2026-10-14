@@ -33,7 +33,8 @@ export type ToolId =
   | 'batch-converter'
   | 'media-info'
   | 'history'
-  | 'settings';
+  | 'settings'
+  | 'burner';
 
 export interface ToolDef {
   id: ToolId;
@@ -51,6 +52,7 @@ export type ConversionMode = 'audio-audio' | 'video-audio' | 'video-video' | 'au
 export interface ConversionSettings {
   mode?: ConversionMode;
   bitrate?: number;
+  quality?: number;
   channels?: 1 | 2;
   videoBitrate?: number;
   fps?: number;

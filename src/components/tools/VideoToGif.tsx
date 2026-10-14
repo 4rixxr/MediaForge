@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Film, Download, RotateCw, CheckCircle2, Sparkles } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { processVideo, loadVideoElement } from '../../services/videoProcessor';
 
 export const VideoToGif: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
+  const [aspectRatio,setAspectRatio]=useState(16/9);
   const [duration, setDuration] = useState(0);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(3);
@@ -16,6 +18,10 @@ export const VideoToGif: React.FC = () => {
   const [resultBlob, setResultBlob] = useState<Blob | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
+  useEffect(()=>{setResultBlob(null);setResultUrl(null);},[file,startTime,endTime,fps,gifWidth]);
+
+  useEffect(()=>()=>{if(resultUrl)URL.revokeObjectURL(resultUrl);},[resultUrl]);
+
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
@@ -24,7 +30,8 @@ export const VideoToGif: React.FC = () => {
     setResultUrl(null);
 
     const { video, cleanup } = await loadVideoElement(f);
-    const dur = video.duration || 5;
+    const dur = video.duration;
+    setAspectRatio(video.videoWidth/video.videoHeight);
     setDuration(dur);
     setStartTime(0);
     setEndTime(Math.min(dur, 4));
@@ -54,10 +61,11 @@ export const VideoToGif: React.FC = () => {
     setProgress(5);
 
     try {
-      const targetHeight = Math.round((gifWidth * 9) / 16);
+      const targetHeight = Math.max(1,Math.round(gifWidth/aspectRatio));
       const res = await processVideo(
         file,
         {
+          format: 'gif',
           startTime,
           endTime,
           fps,
@@ -73,7 +81,7 @@ export const VideoToGif: React.FC = () => {
       setResultUrl(url);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -81,15 +89,17 @@ export const VideoToGif: React.FC = () => {
   const downloadGif = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}.gif`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-pink-500/10 text-pink-500">
           <Film size={20} />
@@ -177,7 +187,7 @@ export const VideoToGif: React.FC = () => {
           <div className="rounded-lg bg-slate-50 dark:bg-slate-950/50 p-3 border border-slate-200/80 dark:border-slate-800 flex justify-between items-center text-xs">
             <span className="text-slate-500">Clip Duration: {clipDuration.toFixed(1)}s</span>
             <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-              Estimated Size: ~{estimatedSizeMb} MB
+              {resultBlob ? `Ukuran hasil: ${(resultBlob.size/1048576).toFixed(2)} MB` : 'Ukuran tersedia setelah konversi'}
             </span>
           </div>
 
@@ -185,12 +195,9 @@ export const VideoToGif: React.FC = () => {
           {resultUrl && (
             <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-950/20 border border-slate-200 dark:border-slate-800">
               <div className="text-xs font-semibold text-slate-400 mb-2">GIF Animation Preview:</div>
-              <video
+              <img
+                alt="GIF hasil konversi"
                 src={resultUrl}
-                autoPlay
-                loop
-                muted
-                playsInline
                 className="max-h-64 rounded-lg shadow-md"
               />
             </div>
@@ -233,6 +240,6 @@ export const VideoToGif: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

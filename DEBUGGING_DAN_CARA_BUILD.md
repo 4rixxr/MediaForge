@@ -1,3 +1,5 @@
+> Catatan versi sebelumnya. Untuk source 1.8.0, gunakan [MULAI_DI_SINI.md](MULAI_DI_SINI.md) dan [PERBAIKAN_1.8.0.md](PERBAIKAN_1.8.0.md).
+
 # MediaForge — hasil debugging dan cara build
 
 Diperiksa dari `MF Lastest.zip` pada 11 Oktober 2026. Versi aplikasi tetap 1.7.0.

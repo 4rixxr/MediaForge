@@ -32,7 +32,8 @@ export const ImageConverter: React.FC = () => {
   useEffect(() => () => { if (resultUrl) URL.revokeObjectURL(resultUrl); }, [resultUrl]);
   useEffect(() => { setResultBlob(null); setResultUrl(null); setError(''); }, [targetFormat, quality, resizeMode, percentage, customWidth, customHeight, keepAspect, backgroundColor]);
 
-  const formats = ['WEBP', 'JPEG', 'PNG', 'AVIF', 'BMP', 'ICO'];
+  const [avifSupported]=useState(()=>document.createElement('canvas').toDataURL('image/avif').startsWith('data:image/avif'));
+  const formats = ['WEBP','JPEG','PNG',...(avifSupported?['AVIF']:[]),'BMP','ICO'];
 
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
@@ -73,6 +74,7 @@ export const ImageConverter: React.FC = () => {
         h = customHeight;
       }
 
+      if(targetFormat==='ico'){w=resizeMode==='original'?64:Math.min(256,w||64);h=w;}
       const res = await convertImage(file, {
         format: targetFormat,
         quality: quality / 100,
@@ -115,7 +117,7 @@ export const ImageConverter: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isConverting} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
           <ImageIcon size={20} />
@@ -205,6 +207,8 @@ export const ImageConverter: React.FC = () => {
                 />
               </div>
 
+              {targetFormat==='ico' && <p className="text-xs text-slate-500">ICO: 64 × 64 secara default; ukuran khusus dibatasi hingga 256 × 256.</p>}
+              {!avifSupported && <p className="text-xs text-slate-500">Ekspor AVIF tidak tersedia pada browser ini.</p>}
               {/* Resize Options */}
               <div className="space-y-2 pt-1 text-xs">
                 <span className="font-semibold text-slate-700 dark:text-slate-300">Resize Mode:</span>
@@ -308,6 +312,6 @@ export const ImageConverter: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

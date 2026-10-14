@@ -1,6 +1,6 @@
 import { useLanguage } from '../../context/LanguageContext';
 import React, { useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, Video, Minimize2, Maximize2, Crop, Scissors, Film, ImageDown, FileAudio, Music, VolumeX, Sliders, Layers, Tv, Image, Shrink, Scaling, FileText, Grid2X2, FileImage, FileSpreadsheet, ArrowLeftRight, ListOrdered, Info, Clock, Settings, ChevronDown, ShieldCheck, Download, X } from 'lucide-react';
+import { LayoutDashboard, Video, Minimize2, Maximize2, Crop, Scissors, Film, ImageDown, FileAudio, Music, VolumeX, Sliders, Layers, Tv, Image, Shrink, Scaling, FileText, Grid2X2, FileImage, FileSpreadsheet, ArrowLeftRight, ListOrdered, Info, Clock, Settings, ChevronDown, ShieldCheck, Download, Disc3, X } from 'lucide-react';
 import { ToolId } from '../../types/media';
 
 interface SidebarProps {
@@ -21,14 +21,16 @@ const CATEGORIES: NavCategory[] = [
   { title: 'Image', icon: Image, items: [
     { id: 'image-converter', label: 'Convert', icon: Image }, { id: 'image-compressor', label: 'Compress', icon: Shrink }, { id: 'image-resizer', label: 'Resize', icon: Scaling }, { id: 'image-cropper', label: 'Crop', icon: Crop }, { id: 'image-to-ico', label: 'Create an icon', icon: Grid2X2 }, { id: 'image-to-webp', label: 'Image to WebP', icon: FileImage },
   ] },
+  { title: 'Burner', icon: Disc3, items: [{id:'burner',label:'VCD / CD / DVD',icon:Disc3}] },
   { title: 'Document', icon: FileText, items: [
-    { id: 'image-to-pdf', label: 'Image to PDF', icon: FileText }, { id: 'pdf-tools', label: 'PDF tools', icon: FileSpreadsheet }, { id: 'file-converter', label: 'File converter', icon: ArrowLeftRight },
+    { id: 'image-to-pdf', label: 'Image to PDF', icon: FileText }, { id: 'pdf-tools', label: 'PDF tools', icon: FileSpreadsheet },
   ] },
 ];
 const WORKSPACE: NavItem[] = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
   { id: 'url-downloader', label: 'Download from URL', icon: Download },
   { id: 'batch-converter', label: 'Batch queue', icon: ListOrdered },
+  { id: 'file-converter', label: 'Audio / Video Converter', icon: ArrowLeftRight },
   { id: 'history', label: 'History', icon: Clock },
 ];
 

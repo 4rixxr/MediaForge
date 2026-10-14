@@ -8,7 +8,7 @@ import { audioBufferToWav } from './audioProcessor';
 import { ffmpegService } from './ffmpegService';
 
 export interface VideoConversionOptions {
-  format?: 'mp4' | 'webm' | 'mkv' | 'mov' | 'gif' | 'avi';
+  format?: 'mp4' | 'webm' | 'mkv' | 'mov' | 'gif' | 'avi' | 'ts' | 'mpeg' | 'mpeg2' | 'dat';
   resolution?: { width: number; height: number };
   bitrate?: number; // bps e.g. 1500000
   fps?: number;
@@ -21,32 +21,21 @@ export interface VideoConversionOptions {
 /**
  * Loads a video file into an HTMLVideoElement and retrieves metadata
  */
-export async function loadVideoElement(file: File | Blob): Promise<{ video: HTMLVideoElement; cleanup: () => void }> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    const url = URL.createObjectURL(file);
-    video.src = url;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
-    video.muted = false;
-
-    video.onloadedmetadata = () => {
-      resolve({
-        video,
-        cleanup: () => {
-          video.pause();
-          video.removeAttribute('src');
-          video.load();
-          URL.revokeObjectURL(url);
-        },
-      });
-    };
-
-    video.onerror = (e) => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Failed to load video file: unsupported container or corrupted data.'));
-    };
-  });
+export async function loadVideoElement(file:File|Blob):Promise<{video:HTMLVideoElement;cleanup:()=>void;preview:Blob}>{
+ const load=(blob:Blob)=>new Promise<{video:HTMLVideoElement;cleanup:()=>void;preview:Blob}>((resolve,reject)=>{
+  const video=document.createElement('video'),url=URL.createObjectURL(blob);
+  let settled=false;
+  const cleanup=()=>{clearTimeout(timer);video.onloadedmetadata=null;video.ondurationchange=null;video.onerror=null;video.pause();video.removeAttribute('src');video.load();URL.revokeObjectURL(url);};
+  const fail=()=>{if(settled)return;settled=true;cleanup();reject(Error('Video tidak dapat dibaca atau durasinya tidak valid.'));};
+  const timer=setTimeout(fail,15000);
+  const ready=()=>{if(settled)return;if(Number.isFinite(video.duration)&&video.duration>0&&video.videoWidth>0){settled=true;clearTimeout(timer);video.onloadedmetadata=null;video.ondurationchange=null;video.onerror=null;video.currentTime=0;resolve({video,cleanup,preview:blob});}else if(video.duration===Infinity)video.currentTime=1e10;};
+  video.preload='auto';video.onloadedmetadata=ready;video.ondurationchange=ready;video.onerror=fail;video.src=url;
+ });
+ try{return await load(file);}catch{
+  // Preview-only transcode for containers the browser cannot decode (e.g. MPEG).
+  const preview=await ffmpegService.convertVideoWithFFmpeg(file instanceof File?file:new File([file],'video-input'),'mp4',{bitrate:2500000});
+  return load(preview);
+ }
 }
 
 /**
@@ -60,7 +49,9 @@ export async function extractVideoFrames(
   maxFrames: number = 60,
   onProgress?: (progress: number) => void
 ): Promise<{ frames: { blob: Blob; timestamp: number; url: string }[]; zipBlob?: Blob }> {
+  if(!Number.isFinite(intervalSeconds)||intervalSeconds<=0||!Number.isInteger(maxFrames)||maxFrames<1||maxFrames>600)throw Error('Interval harus lebih dari nol; maksimum 600 frame.');
   const { video, cleanup } = await loadVideoElement(file);
+  try {
   const duration = video.duration || 1;
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth || 1280;
@@ -71,7 +62,7 @@ export async function extractVideoFrames(
   const frames: { blob: Blob; timestamp: number; url: string }[] = [];
 
   const timestamps: number[] = [];
-  for (let t = 0; t <= duration; t += intervalSeconds) {
+  for (let t = 0; t < duration; t += intervalSeconds) {
     timestamps.push(t);
     if (timestamps.length >= maxFrames) break;
   }
@@ -107,194 +98,20 @@ export async function extractVideoFrames(
   });
 
   const zipBlob = await zip.generateAsync({ type: 'blob' });
-  cleanup();
-
   return { frames, zipBlob };
+  }finally{cleanup();}
 }
 
 /**
- * Real Video Trimmer & Converter using WebAssembly FFmpeg + Canvas MediaRecorder fallback
+ * Video processing through the validated native/WASM FFmpeg conversion path
  */
 export async function processVideo(
   file: File,
   options: VideoConversionOptions,
   onProgress?: (percent: number) => void
 ): Promise<{ blob: Blob; mimeType: string }> {
-  // If no crop and target format is standard, try FFmpeg.wasm first
-  if (!options.crop && (options.format || 'mp4')) {
-    try {
-      const ffmpegBlob = await ffmpegService.convertVideoWithFFmpeg(
-        file,
-        options.format || 'mp4',
-        {
-          resolution: options.resolution,
-          bitrate: options.bitrate,
-          fps: options.fps,
-          startTime: options.startTime,
-          endTime: options.endTime,
-          removeAudio: options.removeAudio,
-        },
-        onProgress
-      );
-      return {
-        blob: ffmpegBlob,
-        mimeType: ffmpegBlob.type || 'video/mp4',
-      };
-    } catch (ffmpegErr) {
-      console.log('Falling back to Canvas MediaRecorder pipeline:', ffmpegErr);
-    }
-  }
-
-  const requestedFormat = options.format || 'mp4';
-  const mimeCandidates = requestedFormat === 'mp4'
-    ? ['video/mp4;codecs=avc1', 'video/mp4']
-    : requestedFormat === 'webm' ? ['video/webm;codecs=vp9', 'video/webm'] : [];
-  const supportedMime = typeof MediaRecorder !== 'undefined'
-    ? mimeCandidates.find((mime) => MediaRecorder.isTypeSupported(mime)) : undefined;
-  if (!supportedMime) throw new Error(`${requestedFormat.toUpperCase()} encoding requires the FFmpeg engine. Check your connection or choose a supported WebM output.`);
-  const { video, cleanup } = await loadVideoElement(file);
-  const duration = video.duration;
-
-  const startTime = Math.max(0, options.startTime || 0);
-  const endTime = Math.min(duration, options.endTime || duration);
-  if (!Number.isFinite(duration) || endTime <= startTime || startTime >= duration) {
-    cleanup();
-    throw new Error('Choose a valid range within the video duration.');
-  }
-  const targetDuration = endTime - startTime;
-
-  const srcWidth = video.videoWidth || 1280;
-  const srcHeight = video.videoHeight || 720;
-
-  // Calculate canvas dimensions based on resolution or crop
-  let targetWidth = options.resolution?.width || srcWidth;
-  let targetHeight = options.resolution?.height || srcHeight;
-
-  if (options.crop) {
-    targetWidth = options.crop.width;
-    targetHeight = options.crop.height;
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext('2d')!;
-
-  await seekVideo(video, startTime);
-
-  const fps = options.fps || 30;
-  const canvasStream = canvas.captureStream(fps);
-
-  // Setup audio stream if not removed
-  let combinedStream: MediaStream = canvasStream;
-  let audioContext: AudioContext | null = null;
-  let sourceNode: MediaElementAudioSourceNode | null = null;
-
-  if (!options.removeAudio) {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      audioContext = new AudioCtx();
-      sourceNode = audioContext.createMediaElementSource(video);
-      const destNode = audioContext.createMediaStreamDestination();
-      sourceNode.connect(destNode);
-      await audioContext.resume();
-
-      combinedStream = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...destNode.stream.getAudioTracks(),
-      ]);
-    } catch (e) {
-      // Audio capture fallback (silence or canvas stream only)
-      combinedStream = canvasStream;
-    }
-  }
-
-  const mimeType = supportedMime;
-
-  const recorder = new MediaRecorder(combinedStream, {
-    mimeType,
-    videoBitsPerSecond: options.bitrate || 2500000,
-  });
-
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data.size > 0) chunks.push(e.data);
-  };
-
-  return new Promise((resolve, reject) => {
-    let animId: number;
-    let started = false;
-
-    recorder.onstop = () => {
-      cancelAnimationFrame(animId);
-      combinedStream.getTracks().forEach((track) => track.stop());
-      video.pause();
-      if (audioContext && audioContext.state !== 'closed') {
-        audioContext.close();
-      }
-      cleanup();
-      resolve({
-        blob: new Blob(chunks, { type: mimeType }),
-        mimeType,
-      });
-    };
-
-    recorder.onerror = (e) => {
-      cancelAnimationFrame(animId);
-      combinedStream.getTracks().forEach((track) => track.stop());
-      if (audioContext) void audioContext.close();
-      cleanup();
-      reject(e);
-    };
-
-    video.onplay = () => {
-      if (!started) {
-        started = true;
-        recorder.start(100);
-      }
-    };
-
-    function renderLoop() {
-      if (options.crop) {
-        ctx.drawImage(
-          video,
-          options.crop.x,
-          options.crop.y,
-          options.crop.width,
-          options.crop.height,
-          0,
-          0,
-          targetWidth,
-          targetHeight
-        );
-      } else {
-        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-      }
-
-      const current = video.currentTime;
-      const progress = Math.min(99, Math.round(((current - startTime) / targetDuration) * 100));
-      if (onProgress) onProgress(progress);
-
-      if (current >= endTime || video.ended) {
-        if (recorder.state !== 'inactive') recorder.stop();
-      } else {
-        animId = requestAnimationFrame(renderLoop);
-      }
-    }
-
-    renderLoop();
-    video.play().catch((err) => {
-      // If autoplay policy blocks with sound, mute temporarily
-      video.muted = true;
-      video.play().catch((error) => {
-        cancelAnimationFrame(animId);
-        combinedStream.getTracks().forEach((track) => track.stop());
-        if (audioContext) void audioContext.close();
-        cleanup();
-        reject(error);
-      });
-    });
-  });
+  const blob=await ffmpegService.convertVideoWithFFmpeg(file,options.format||'mp4',options,onProgress);
+  return {blob,mimeType:blob.type};
 }
 
 /**

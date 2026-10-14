@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {reportToolError} from '../../services/toolErrors';
+import React, { useState, useEffect } from 'react';
 import { Tv, Download, RotateCw, CheckCircle2, Image as ImageIcon, Music } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
 import { audioToVideo } from '../../services/audioProcessor';
@@ -10,6 +11,10 @@ export const AudioToVideo: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [resultBlob, setResultBlob] = useState<Blob | null>(null);
+
+  useEffect(()=>{setResultBlob(null);},[audioFile,coverImage]);
+
+  useEffect(()=>()=>{if(coverPreview)URL.revokeObjectURL(coverPreview);},[coverPreview]);
 
   const handleAudio = (files: File[]) => {
     if (!files[0]) return;
@@ -34,7 +39,7 @@ export const AudioToVideo: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -42,15 +47,17 @@ export const AudioToVideo: React.FC = () => {
   const downloadVideo = () => {
     if (!resultBlob || !audioFile) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${audioFile.name.replace(/\.[^/.]+$/, '')}_visualizer.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500">
           <Tv size={20} />
@@ -159,6 +166,6 @@ export const AudioToVideo: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

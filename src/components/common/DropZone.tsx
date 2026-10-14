@@ -1,8 +1,9 @@
+import {reportToolError} from '../../services/toolErrors';
 import React, { useRef, useState, useEffect, useCallback, useId } from 'react';
 import { Upload, FileUp, AlertCircle, ClipboardCheck } from 'lucide-react';
 
 interface DropZoneProps {
-  onFilesSelected: (files: File[]) => void;
+  onFilesSelected: (files: File[]) => void | Promise<void>;
   accept?: string;
   multiple?: boolean;
   label?: string;
@@ -28,6 +29,8 @@ export const DropZone: React.FC<DropZoneProps> = ({
   description = 'Choose from your device, or paste a file from the clipboard.',
   compact = false,
 }) => {
+  const extensions={audio:'.mp3,.wav,.aac,.m4a,.flac,.ogg,.opus,.aiff,.aif,.wma',video:'.mp4,.webm,.mkv,.mov,.avi,.m4v,.ts,.mpg,.mpeg,.mpeg2,.dat,.wmv',image:'.png,.jpg,.jpeg,.webp,.avif,.gif,.bmp,.ico,.svg'};
+  for(const [kind,list] of Object.entries(extensions))if(accept.includes(kind+'/*'))accept+=','+list;
   const [isDragging, setIsDragging] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
   const [pastedNotification, setPastedNotification] = useState(false);
@@ -37,7 +40,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
   const warningId = useId();
 
   const handleFiles = useCallback((fileList: FileList | null) => {
-    if (!fileList?.length) return false;
+    if (!fileList?.length||inputRef.current?.matches(':disabled')) return false;
     const allFiles = Array.from(fileList);
     const accepted = allFiles.filter((file) => matchesAccept(file, accept));
     const files = multiple ? accepted : accepted.slice(0, 1);
@@ -47,7 +50,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
     if (files.some((file) => file.size > 150 * 1024 * 1024)) messages.push('Files over 150 MB may need more time and browser memory.');
     setWarning(messages.join(' ') || null);
     if (!files.length) return false;
-    onFilesSelected(files);
+    try { Promise.resolve(onFilesSelected(files)).catch(error=>{setWarning(error instanceof Error?error.message:String(error));reportToolError(error);}); } catch(error){reportToolError(error);}
     return true;
   }, [accept, multiple, onFilesSelected]);
 

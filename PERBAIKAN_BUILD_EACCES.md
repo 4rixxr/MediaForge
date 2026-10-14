@@ -1,3 +1,5 @@
+> Catatan versi sebelumnya. Untuk source 1.8.0, gunakan [MULAI_DI_SINI.md](MULAI_DI_SINI.md) dan [PERBAIKAN_1.8.0.md](PERBAIKAN_1.8.0.md).
+
 # Perbaikan jalur build Electron
 
 Panduan terkini ada di [DEBUGGING_DAN_CARA_BUILD.md](DEBUGGING_DAN_CARA_BUILD.md).

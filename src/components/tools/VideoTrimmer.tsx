@@ -1,3 +1,4 @@
+import {reportToolError} from '../../services/toolErrors';
 import React, { useState, useRef, useEffect } from 'react';
 import { Scissors, Play, Pause, Download, RotateCw, CheckCircle2, RotateCcw } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
@@ -17,13 +18,17 @@ export const VideoTrimmer: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  useEffect(()=>{setResultBlob(null);},[file,startTime,endTime]);
+
+  useEffect(()=>()=>{if(videoUrl)URL.revokeObjectURL(videoUrl);},[videoUrl]);
+
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
     setFile(f);
     setResultBlob(null);
 
-    const { video, cleanup } = await loadVideoElement(f);
+    const { video, cleanup, preview } = await loadVideoElement(f);
     const dur = video.duration || 10;
     setDuration(dur);
     setStartTime(0);
@@ -31,7 +36,7 @@ export const VideoTrimmer: React.FC = () => {
     setCurrentTime(0);
     cleanup();
 
-    setVideoUrl(URL.createObjectURL(f));
+    setVideoUrl(URL.createObjectURL(preview));
   };
 
   const formatTimestamp = (sec: number) => {
@@ -65,8 +70,7 @@ export const VideoTrimmer: React.FC = () => {
       if (videoRef.current.currentTime < startTime || videoRef.current.currentTime >= endTime) {
         videoRef.current.currentTime = startTime;
       }
-      videoRef.current.play();
-      setIsPlaying(true);
+      videoRef.current.play().then(()=>setIsPlaying(true)).catch(reportToolError);
     }
   };
 
@@ -102,7 +106,7 @@ export const VideoTrimmer: React.FC = () => {
       setResultBlob(res.blob);
       setIsProcessing(false);
     } catch (e) {
-      console.error(e);
+      reportToolError(e);
       setIsProcessing(false);
     }
   };
@@ -110,15 +114,17 @@ export const VideoTrimmer: React.FC = () => {
   const downloadTrimmed = () => {
     if (!resultBlob || !file) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(resultBlob);
+    const downloadUrl = URL.createObjectURL(resultBlob);
+    a.href = downloadUrl;
     a.download = `${file.name.replace(/\.[^/.]+$/, '')}_trimmed.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(downloadUrl),60000);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <fieldset disabled={isProcessing} style={{minWidth:0}} className="max-w-4xl mx-auto space-y-6 pb-12">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/10 text-rose-500">
           <Scissors size={20} />
@@ -263,6 +269,6 @@ export const VideoTrimmer: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

@@ -1,8 +1,9 @@
 /** MediaForge URL downloader: local-only Node backend. Requires yt-dlp and ffmpeg in PATH.
  * Never bypass DRM, authentication or platform access controls. */
 import http from 'node:http';
+import {audioArgs,audioProfiles,videoArgs} from './shared/media-profiles.js';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,9 @@ const binaries = {'yt-dlp': process.env.MEDIAFORGE_YTDLP || 'yt-dlp', 'ffmpeg': 
 const PORT = Number(process.env.MEDIAFORGE_PORT || 8787);
 const HOST = process.env.MEDIAFORGE_HOST || '127.0.0.1';
 const DIST = path.join(ROOT, 'dist');
+// Electron's executable is not a standalone Node CLI. Windows ships node.exe.
+const jsRuntime = process.env.MEDIAFORGE_JS_RUNTIME || (!process.versions.electron ? `node:${process.execPath}` : null);
+const extractorArgs = () => ['--ignore-config','--no-playlist','--no-progress','--encoding','utf-8','--socket-timeout','30','--retries','3',...(jsRuntime?['--js-runtimes',jsRuntime]:[])];
 const active = new Map();
 const maxDuration = 10 * 60 * 1000;
 const hosts = {
@@ -53,8 +57,9 @@ function validateOption(data,metadata){
   if(!['original','16:9','9:16','1:1','4:3'].includes(ratio))throw Error('Rasio tidak valid.');
   if(kind==='audio' && ratio!=='original')throw Error('Rasio hanya berlaku untuk video.');
   if(!['original','2160','1440','1080','720','480','360'].includes(String(resolution)))throw Error('Resolusi tidak valid.');
-  if(kind==='video'&&!['mp4','webm','mkv'].includes(format))throw Error('Format video tidak valid.');
-  if(kind==='audio'&&!['original','mp3','m4a','flac','wav','opus'].includes(format))throw Error('Format audio tidak valid.');
+  if(kind==='video'&&!['mp4','webm','mkv','mpeg','mpeg2','dat'].includes(format))throw Error('Format video tidak valid.');
+  if(kind==='audio'&&format!=='original'&&!audioProfiles[format])throw Error('Format audio tidak valid.');
+  if(kind==='audio'&&format!=='original')audioArgs(format,{bitrate:data.bitrate,quality:data.quality});
   if(start === null || end === null || start === '' || end === '')throw Error('Rentang waktu tidak valid.');
   const a=Number(start),b=Number(end);
   if(!Number.isFinite(a)||a<0||!Number.isFinite(b)||b<0|| (b>0&&b<=a))throw Error('Rentang pemotongan tidak valid.');
@@ -65,14 +70,16 @@ async function handle(req,res,run=exec){
   const route=new URL(req.url||'/',`http://${HOST}:${PORT}`).pathname;
   if(req.method==='POST' && (route==='/api/url/info'||route==='/api/url/download')){
     const origin = req.headers.origin;
-    if (origin && origin !== `http://${HOST}:${req.socket.localPort}`) return send(res,403,{error:'Permintaan dari origin lain ditolak.'});
+    if (origin && ![`http://127.0.0.1:${req.socket.localPort}`,`http://localhost:${req.socket.localPort}`,`http://[::1]:${req.socket.localPort}`].includes(origin)) return send(res,403,{error:'Permintaan dari origin lain ditolak.'});
     if (req.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') return send(res,415,{error:'Hanya permintaan JSON yang didukung.'});
     try{
       const input=await body(req);
+      if(typeof input.url==='string')input.url=input.url.trim();
       const p=platform(input.url);
       const restricted=drmError(p);
       if(restricted)return send(res,422,{error:restricted,platform:p,restricted:true});
-      const raw=await run('yt-dlp',['--ignore-config','--no-playlist','--no-warnings','--skip-download','--dump-single-json','--no-call-home','--',input.url],90000);
+      if(route.endsWith('/download'))validateOption(input,{});
+      const raw=await run('yt-dlp',[...extractorArgs(),'--skip-download','--dump-single-json','--',input.url],90000);
       const meta=JSON.parse(raw);
       if(meta.is_live)throw Error('Live streaming belum didukung.');
       const info={title:meta.title||'Untitled',duration:meta.duration||0,thumbnail:meta.thumbnail||null,platform:p,formats:formatList(meta),originalWidth:meta.width||null,originalHeight:meta.height||null};
@@ -82,40 +89,44 @@ async function handle(req,res,run=exec){
       const token=randomUUID();active.set(token,{temp,created:Date.now()});
       try{
         const output=path.join(temp,'download.%(ext)s');
-        const args=['--ignore-config','--no-playlist','--no-warnings','--no-call-home','--no-part','-o',output];
+        const args=[...extractorArgs(),'--no-part','--no-simulate','--print','after_move:%(filepath)j','-o',output];
         // yt-dlp does not understand MEDIAFORGE_FFMPEG. Pass its bundled path explicitly.
         if (process.env.MEDIAFORGE_FFMPEG) args.push('--ffmpeg-location', path.dirname(binaries.ffmpeg));
         const isAudio=input.kind==='audio';
         if(isAudio){
           if(input.format==='original')args.push('-f','bestaudio/best','-x','--audio-format','best');
-          else {args.push('-f','bestaudio/best','-x','--audio-format',input.format,'--audio-quality','0');}
+          else {args.push('-f','bestaudio/best','-x','--audio-format','best');}
         }else{
           const cap=input.resolution==='original'?'':`[height<=${input.resolution}]`;
-          args.push('-f',`bestvideo${cap}+bestaudio/best${cap}`,'--merge-output-format',input.format);
-          if(input.format==='mp4')args.push('--recode-video','mp4');
-          if(input.format==='webm')args.push('--recode-video','webm');
-          if(input.format==='mkv')args.push('--remux-video','mkv');
+          // Prefer bounded streams, but scale locally if the site only offers larger ones.
+          // The video-only fallback also permits silent videos.
+          args.push('-f',`bestvideo${cap}+bestaudio/best${cap}/bestvideo${cap}/bestvideo+bestaudio/best/bestvideo`,'--merge-output-format','mkv','--remux-video','mkv');
         }
-        if(a>0||b>0)args.push('--download-sections',`*${a||0}-${b||'inf'}`,'--force-keyframes-at-cuts');
         args.push('--',input.url);
-        await run('yt-dlp',args);
-        const files=(await readdir(temp)).filter(n=>!n.endsWith('.part')&&!n.endsWith('.ytdl'));
-        const candidate=files.find(n=>n.startsWith('download.'));
-        if(!candidate)throw Error('Berkas tidak ditemukan setelah pengunduhan.');
-        let file=path.join(temp,candidate);
+        const downloaded=await run('yt-dlp',args);
+        const paths=downloaded.trim().split(/\r?\n/).flatMap(line=>{try{const value=JSON.parse(line);return typeof value==='string'?[value]:[];}catch{return [];}});
+        let file=paths.at(-1);
+        if(!file||path.dirname(path.resolve(file))!==path.resolve(temp))throw Error('yt-dlp tidak mengembalikan lokasi berkas final yang valid.');
+        const source=await stat(file);if(!source.isFile()||!source.size)throw Error('Berkas unduhan kosong atau tidak tersedia.');
+        const trim=[...(a>0?['-ss',String(a)]:[]),...(b>0?['-t',String(b-a)]:[])];
+        if(isAudio&&(input.format!=='original'||trim.length)){const out=path.join(temp,'audio.'+(input.format==='original'?path.extname(file).slice(1):input.format));await run('ffmpeg',['-hide_banner','-loglevel','error','-nostdin','-y','-i',file,...trim,'-map','0:a:0','-vn',...(input.format==='original'?['-c:a','copy']:audioArgs(input.format,{bitrate:input.bitrate,quality:input.quality})),out]);file=out;}
         // Filter crop/scale and container correction after download; FFmpeg re-encodes video when needed.
-        const edited=input.kind==='video' && input.ratio!=='original';
+        const edited=input.kind==='video';
         if(edited){
           const desired=input.ratio==='original'?null:input.ratio.split(':').map(Number);
           const vf=[];
           if(desired){const [w,h]=desired;vf.push(`crop='trunc(min(iw,ih*${w}/${h})/2)*2':'trunc(min(ih,iw*${h}/${w})/2)*2'`);}
-          // Resolution is already capped during stream selection. Avoid needless re-encoding.
+          if(input.resolution!=='original'&&input.format!=='dat')vf.push(`scale=w=-2:h='min(ih,${Number(input.resolution)})'`);
+          if(input.format!=='dat')vf.push('pad=ceil(iw/2)*2:ceil(ih/2)*2');
           const out=path.join(temp,`final.${input.format}`);
-          const codec=input.format==='webm'?['-c:v','libvpx-vp9','-c:a','libopus']:['-c:v','libx264','-crf','18','-preset','medium','-c:a','aac','-b:a','192k'];
-          await run('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',file,'-vf',vf.join(','),...codec,out]);
+          const codec=['mpeg','mpeg2','dat'].includes(input.format)?videoArgs(input.format,{bitrate:2500000}):input.format==='webm'?['-c:v','libvpx-vp9','-crf','30','-b:v','0','-deadline','good','-cpu-used','4','-c:a','libopus','-b:a','128k']:['-c:v','libx264','-pix_fmt','yuv420p','-crf','18','-preset','fast','-c:a','aac','-b:a','192k',...(input.format==='mp4'?['-movflags','+faststart']:[])];
+          // A second -vf would replace the requested crop for the fixed VCD profile.
+          const profileFilter=codec.indexOf('-vf');
+          if(profileFilter>=0)vf.push(codec.splice(profileFilter,2)[1]);
+          await run('ffmpeg',['-hide_banner','-loglevel','error','-nostdin','-y','-i',file,...trim,'-map','0:v:0','-map','0:a:0?',...(vf.length?['-vf',vf.join(',')]:[]),...codec,out]);
           file=out;
         }
-        const st=await stat(file);
+        const st=await stat(file);if(!st.size)throw Error('Berkas keluaran kosong.');
         const ext=path.extname(file);
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Length':st.size,'Content-Disposition':`attachment; filename="${safeFile(info.title).replace(/[^\x20-\x7e]/g,'_')} ${ext}"`.replace(' '+ext,ext),'Cache-Control':'no-store'});
         const stream=createReadStream(file);
@@ -131,7 +142,7 @@ async function handle(req,res,run=exec){
   try{
     let file=path.resolve(DIST,'.'+decodeURIComponent(route));
     if(!file.startsWith(DIST+path.sep)&&file!==DIST)return send(res,403,{error:'Forbidden'});
-    const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.ico':'image/x-icon'};
+    const types={'.html':'text/html','.js':'text/javascript','.wasm':'application/wasm','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.ico':'image/x-icon'};
     let st;try{st=await stat(file);if(st.isDirectory())throw Error('directory');}catch{file=path.join(DIST,'index.html');st=await stat(file);}
     res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Content-Length':st.size,'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'credentialless'});
     if(req.method==='HEAD')res.end();else createReadStream(file).pipe(res);

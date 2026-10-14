@@ -15,3 +15,18 @@ contextBridge.exposeInMainWorld('mediaforgeUpdates', {
     return () => ipcRenderer.removeListener('mediaforge:update', listener);
   }
 });
+
+contextBridge.exposeInMainWorld('mediaforgeBurner', {
+ status:()=>ipcRenderer.invoke('mediaforge:burner:status'),
+ choose:()=>ipcRenderer.invoke('mediaforge:burner:choose'),
+ build:request=>ipcRenderer.invoke('mediaforge:burner:build',request),
+ save:id=>ipcRenderer.invoke('mediaforge:burner:save',id),
+ burn:(id,drive)=>ipcRenderer.invoke('mediaforge:burner:burn',id,drive),
+ subscribe:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('mediaforge:burner:progress',listener);return()=>ipcRenderer.removeListener('mediaforge:burner:progress',listener);},
+});
+
+contextBridge.exposeInMainWorld('mediaforgeMedia', {
+ inspect:bytes=>ipcRenderer.invoke('mediaforge:media:inspect',bytes),
+ convert:(id,request)=>ipcRenderer.invoke('mediaforge:media:convert',id,request),
+ subscribe:callback=>{const listener=(_event,data)=>callback(data);ipcRenderer.on('mediaforge:media:progress',listener);return()=>ipcRenderer.removeListener('mediaforge:media:progress',listener);},
+});

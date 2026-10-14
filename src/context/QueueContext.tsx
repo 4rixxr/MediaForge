@@ -1,3 +1,4 @@
+import {mediaFileCategory} from '../services/mediaFileType';
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import JSZip from 'jszip';
 import { QueueJob, ConversionSettings } from '../types/media';
@@ -50,23 +51,9 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addJobs = (files: File[], defaultTargetFormat?: string, settings?: ConversionSettings) => {
     const newJobs: QueueJob[] = files.map((file) => {
-      let category: 'video' | 'audio' | 'image' | 'document' = 'image';
-      let target = defaultTargetFormat || 'webp';
-
-      const extension = file.name.split('.').pop()?.toLowerCase() || '';
-      if (file.type.startsWith('video/') || ['mp4','webm','mkv','mov','avi','m4v','ts'].includes(extension)) {
-        category = 'video';
-        target = defaultTargetFormat || 'mp4';
-      } else if (file.type.startsWith('audio/') || ['mp3','wav','aac','flac','m4a','ogg','opus','aiff'].includes(extension)) {
-        category = 'audio';
-        target = defaultTargetFormat || 'mp3';
-      } else if (file.type.startsWith('image/')) {
-        category = 'image';
-        target = defaultTargetFormat || 'webp';
-      } else if (file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf')) {
-        category = 'document';
-        target = defaultTargetFormat || 'pdf';
-      }
+      const category=mediaFileCategory(file);
+      if(!category)throw Error('Format berkas tidak dikenal: '+file.name);
+      const target=defaultTargetFormat||({audio:'mp3',video:'mp4',image:'webp',document:'pdf'}[category]);
 
       return {
         id: 'job-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
@@ -138,11 +125,6 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const completed = jobs.filter((j) => j.status === 'completed' && j.outputBlob && j.outputFileName);
     if (completed.length === 0) return;
 
-    if (completed.length === 1) {
-      downloadJobOutput(completed[0].id);
-      return;
-    }
-
     const zip = new JSZip();
     const usedNames = new Set<string>();
     completed.forEach((job) => {
@@ -196,7 +178,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         outputBlob = await ffmpegService.audioToVideo(job.file, outExt, job.settings, reportProgress);
       } else if (job.settings?.mode === 'video-audio') {
         const res = await convertAudio(job.file, {
-          format: outExt as any, bitrate: job.settings.bitrate, channels: job.settings.channels,
+          format: outExt as any, bitrate: job.settings.bitrate, quality:job.settings.quality, channels: job.settings.channels,
         }, reportProgress);
         outputBlob = res.blob;
         outExt = res.format;
@@ -214,6 +196,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const res = await convertAudio(job.file, {
           format: (outExt as any) || 'wav',
           bitrate: job.settings?.bitrate,
+          quality: job.settings?.quality,
           channels: job.settings?.channels,
         }, (prog) => {
           if (!cancelledJobs.current.has(id)) updateJob(id, { progress: prog });

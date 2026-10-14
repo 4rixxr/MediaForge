@@ -2,12 +2,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const app = path.join(root, '.mediaforge-app');
-for (const filename of ['dist/index.html', 'desktop/main.cjs', 'desktop/preload.cjs', 'server.js', 'package-lock.json']) {
+for (const filename of ['dist/index.html', 'desktop/main.cjs', 'desktop/preload.cjs', 'server.js', 'shared/media-profiles.js', 'shared/conversion.js', 'desktop/media.cjs', 'dist/ffmpeg/ffmpeg-core.js', 'dist/ffmpeg/ffmpeg-core.wasm', 'package-lock.json']) {
   if (!fs.existsSync(path.join(root, filename))) throw Error('Jalankan npm run build terlebih dahulu. Berkas tidak ditemukan: ' + filename);
 }
 fs.rmSync(app, {recursive:true,force:true});
 fs.mkdirSync(app,{recursive:true});
-for (const filename of ['dist','desktop','server.js']) {
+for (const filename of ['dist','desktop','server.js','shared']) {
   const from=path.join(root,filename), to=path.join(app,filename);
   if(!fs.existsSync(from)) throw Error('Hasil build tidak ditemukan: '+filename);
   fs.cpSync(from,to,{recursive:true});

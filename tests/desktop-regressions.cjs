@@ -5,6 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '..');
+test('Windows Node staging uses the installed license, not an assumed dist URL',()=>{
+  const script=fs.readFileSync(path.join(root,'scripts/fetch-windows-tools.ps1'),'utf8');
+  assert.match(script,/Split-Path -Parent \$nodeSource/);
+  assert.match(script,/Copy-Item -LiteralPath \$nodeLicense/);
+  assert.doesNotMatch(script,/nodejs\.org\/dist\/\$nodeVersion\/LICENSE/);
+});
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mf-build-test-'));
   fs.cpSync(path.join(root, 'scripts'), path.join(dir, 'scripts'), {recursive:true});
@@ -14,8 +20,20 @@ function fixture(t) {
 function run(dir, script) {
   return spawnSync(process.execPath,[path.join(dir,'scripts',script)],{cwd:dir,encoding:'utf8'});
 }
+test('build preflight rejects inconsistent release versions and dependency specifications',t=>{
+ const dir=fixture(t),{check}=require('../scripts/check-build-inputs.cjs');
+ const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+ const lock=JSON.parse(fs.readFileSync(path.join(root,'package-lock.json'),'utf8'));
+ fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify(pkg));
+ fs.writeFileSync(path.join(dir,'package-lock.json'),JSON.stringify({...lock,version:'0.0.0'}));
+ assert.throws(()=>check(dir),/versions do not match/);
+ lock.packages[''].devDependencies.electron='0.0.0';
+ fs.writeFileSync(path.join(dir,'package-lock.json'),JSON.stringify(lock));
+ assert.throws(()=>check(dir),/devDependencies differs/);
+});
 test('clean removes generated output but preserves backend source', t=>{
   const dir=fixture(t);
+  fs.mkdirSync(path.join(dir,'shared'),{recursive:true});
   fs.writeFileSync(path.join(dir,'server.js'),'source');
   for(const name of ['dist','release','.mediaforge-app']) fs.mkdirSync(path.join(dir,name));
   assert.equal(run(dir,'clean.cjs').status,0);
@@ -33,7 +51,7 @@ test('staging fails before deleting previous app when dist is missing', t=>{
 });
 test('staging includes current output and only production dependency lock records', t=>{
   const dir=fixture(t);
-  for(const name of ['dist/index.html','desktop/main.cjs','desktop/preload.cjs','server.js']) {
+  for(const name of ['dist/index.html','desktop/main.cjs','desktop/preload.cjs','server.js','shared/media-profiles.js','shared/conversion.js','desktop/media.cjs','dist/ffmpeg/ffmpeg-core.js','dist/ffmpeg/ffmpeg-core.wasm']) {
     fs.mkdirSync(path.dirname(path.join(dir,name)),{recursive:true});
     fs.writeFileSync(path.join(dir,name),'current '+name);
   }
@@ -60,7 +78,7 @@ test('packaged verification uses Windows separators and still rejects missing up
     exports, require: name => name === 'path' ? path.win32 : localRequire(name), Buffer, process,
   }, {filename:asarFs});
   const archiveFs = new exports.Filesystem('C:\\app');
-  const names = ['dist/index.html','server.js','desktop/main.cjs','desktop/preload.cjs','node_modules/electron-updater/package.json'];
+  const names = ['dist/index.html','server.js','shared/media-profiles.js', 'shared/conversion.js', 'desktop/media.cjs', 'dist/ffmpeg/ffmpeg-core.js', 'dist/ffmpeg/ffmpeg-core.wasm','desktop/main.cjs','desktop/preload.cjs','desktop/burner.cjs','desktop/burner-core.cjs','node_modules/electron-updater/package.json'];
   const header = {files:{}};
   for(const name of names){let node=header;const parts=name.split('/');for(const part of parts.slice(0,-1))node=node.files[part] ||= {files:{}};node.files[parts.at(-1)]={size:1,offset:'0'};}
   archiveFs.setHeader(header,0);

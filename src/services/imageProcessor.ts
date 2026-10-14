@@ -41,12 +41,13 @@ export async function convertImage(
 ): Promise<{ blob: Blob; width: number; height: number; originalSize: number; newSize: number }> {
   const originalSize = file.size;
 
+  for(const value of [options.width,options.height])if(value!==undefined&&(!Number.isInteger(value)||value<1||value>16384))throw Error('Ukuran gambar harus berupa piksel utuh antara 1–16384.');
   if (options.format === 'ico') {
     const icoBlob = await createIco(file, options.width || 64);
     return {
       blob: icoBlob,
       width: options.width || 64,
-      height: options.height || 64,
+      height: options.width || 64,
       originalSize,
       newSize: icoBlob.size,
     };
@@ -124,7 +125,7 @@ export async function convertImage(
 
   const quality = typeof options.quality === 'number' ? options.quality : 0.92;
 
-  const blob = await new Promise<Blob>((resolve, reject) => {
+  const blob = options.format==='bmp'?encodeBmp(ctx.getImageData(0,0,canvas.width,canvas.height)):await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (b) => {
         if (b && b.type === mimeType) resolve(b);
@@ -145,6 +146,17 @@ export async function convertImage(
   };
 }
 
+// Uncompressed Windows BMP: bottom-up BGR rows aligned to four bytes.
+export function encodeBmp(image:ImageData):Blob {
+ const {width,height,data}=image,stride=Math.ceil(width*3/4)*4;
+ const bytes=new Uint8Array(54+stride*height),view=new DataView(bytes.buffer);
+ bytes[0]=0x42;bytes[1]=0x4d;view.setUint32(2,bytes.length,true);view.setUint32(10,54,true);
+ view.setUint32(14,40,true);view.setInt32(18,width,true);view.setInt32(22,height,true);
+ view.setUint16(26,1,true);view.setUint16(28,24,true);view.setUint32(34,stride*height,true);
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){const src=(y*width+x)*4,dst=54+(height-1-y)*stride+x*3;bytes[dst]=data[src+2];bytes[dst+1]=data[src+1];bytes[dst+2]=data[src];}
+ return new Blob([bytes],{type:'image/bmp'});
+}
+
 /**
  * Real client-side image cropper
  */
@@ -155,6 +167,7 @@ export async function cropImage(
   quality: number = 0.92
 ): Promise<Blob> {
   const img = await loadImageFromFile(file);
+  if((['x','y','width','height'] as const).some(k=>!Number.isFinite(cropArea[k]))||cropArea.x<0||cropArea.y<0||cropArea.width<1||cropArea.height<1||cropArea.x+cropArea.width>img.naturalWidth||cropArea.y+cropArea.height>img.naturalHeight)throw Error('Area crop melewati ukuran gambar.');
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(cropArea.width));
   canvas.height = Math.max(1, Math.round(cropArea.height));

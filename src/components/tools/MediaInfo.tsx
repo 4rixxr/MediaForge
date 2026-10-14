@@ -1,3 +1,4 @@
+import {reportToolError} from '../../services/toolErrors';
 import React, { useState } from 'react';
 import { Info, FileCode, CheckCircle2, Copy } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
@@ -12,16 +13,15 @@ export const MediaInfo: React.FC = () => {
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
-    setFile(f);
+    setFile(f);setMetadata(null);
 
     const meta = await inspectMediaFile(f);
     setMetadata(meta);
   };
 
-  const copyAsJson = () => {
+  const copyAsJson = async () => {
     if (!metadata) return;
-    navigator.clipboard.writeText(JSON.stringify(metadata, null, 2));
-    setCopied(true);
+    try{await navigator.clipboard.writeText(JSON.stringify(metadata,null,2));setCopied(true);}catch(error){reportToolError(error);}
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -145,7 +145,7 @@ export const MediaInfo: React.FC = () => {
                   )}
                   {metadata.bitrate !== undefined && (
                     <div className="flex justify-between">
-                      <span className="text-slate-500 font-sans">Bitrate:</span>
+                      <span className="text-slate-500 font-sans">Bitrate total (perkiraan):</span>
                       <span>~{Math.round(metadata.bitrate / 1000)} kbps</span>
                     </div>
                   )}

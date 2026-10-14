@@ -1,0 +1,47 @@
+// Real browser processing + independent output inspection. Playwright is QA-only.
+const {chromium}=require('playwright');const {spawn,execFileSync}=require('node:child_process');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..'),port=8797,ffmpeg=process.env.MEDIAFORGE_FFMPEG||'ffmpeg',ffprobe=process.env.MEDIAFORGE_FFPROBE||'ffprobe';
+(async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mf-tools-')),results=[];let browser;
+ const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port',String(port)],{cwd:root,stdio:'ignore'});
+ try{
+  const wav=path.join(dir,'source.wav'),video=path.join(dir,'source.webm');
+  execFileSync(ffmpeg,['-v','error','-f','lavfi','-i','sine=frequency=440:duration=2','-ar','44100','-ac','2',wav]);
+  execFileSync(ffmpeg,['-v','error','-f','lavfi','-i','testsrc2=s=320x240:r=25:d=2','-i',wav,'-c:v','libvpx','-c:a','libvorbis','-shortest',video]);
+  for(let i=0;i<50;i++){try{await fetch(`http://127.0.0.1:${port}`);break;}catch{await new Promise(r=>setTimeout(r,100));}}
+  browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required'],...(process.env.MEDIAFORGE_CHROMIUM?{executablePath:process.env.MEDIAFORGE_CHROMIUM}:{})});
+  const page=await browser.newPage({viewport:{width:1280,height:960}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  if(process.env.MEDIAFORGE_TEST_NATIVE){const {convertMedia}=require('../desktop/media.cjs');await page.exposeFunction('__nativeMedia',async r=>{const o=await convertMedia({...r,bytes:Uint8Array.from(r.bytes).buffer},{ffmpeg,ffprobe});return {...o,bytes:Array.from(o.bytes)};});await page.addInitScript(()=>{window.mediaforgeMedia={subscribe:()=>()=>{},convert:async(_id,r)=>{const o=await window.__nativeMedia({...r,bytes:Array.from(new Uint8Array(r.bytes))});return {...o,bytes:Uint8Array.from(o.bytes)};}};});}
+  await page.goto(`http://127.0.0.1:${port}`);await page.getByRole('heading',{name:'Siapkan berkas'}).waitFor();
+  await page.evaluate(async({audio,video})=>{window.qaAudio=new File([Uint8Array.from(audio)],'source.wav',{type:'audio/wav'});window.qaVideo=new File([Uint8Array.from(video)],'source.webm',{type:'video/webm'});window.qaA=await import('/src/services/audioProcessor.ts');window.qaV=await import('/src/services/videoProcessor.ts');window.qaI=await import('/src/services/imageProcessor.ts');}, {audio:Array.from(fs.readFileSync(wav)),video:Array.from(fs.readFileSync(video))});
+  async function check(name,fn,verify){const bytes=await page.evaluate(fn);const file=path.join(dir,name);fs.writeFileSync(file,Buffer.from(bytes));const info=JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-show_format','-count_frames','-of','json',file],{encoding:'utf8'}));verify(info,fs.readFileSync(file));results.push(name);console.log('PASS actual tool output:',name);}
+  await check('cut.wav',async()=>Array.from(new Uint8Array(await(await window.qaA.cutAudio(window.qaAudio,.25,1.25)).blob.arrayBuffer())),i=>assert.ok(Math.abs(Number(i.format.duration)-1)<.01));
+  await check('merge.wav',async()=>Array.from(new Uint8Array(await(await window.qaA.mergeAudioFiles([window.qaAudio,window.qaAudio])).blob.arrayBuffer())),i=>assert.ok(Math.abs(Number(i.format.duration)-4)<.01));
+  for(const [name,options,width,height,duration,codec] of [['crop.mp4',{crop:{x:20,y:10,width:160,height:120}},160,120,2,'h264'],['resize.mp4',{resolution:{width:240,height:180}},240,180,2,'h264'],['trim.mp4',{startTime:.4,endTime:1.4},320,240,1,'h264'],['animated.gif',{format:'gif',fps:10,resolution:{width:160,height:120}},160,120,2,'gif']]){
+   const bytes=await page.evaluate(async options=>Array.from(new Uint8Array(await(await window.qaV.processVideo(window.qaVideo,options)).blob.arrayBuffer())),options);
+   const file=path.join(dir,name);fs.writeFileSync(file,Buffer.from(bytes));const info=JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-show_format','-count_frames','-of','json',file],{encoding:'utf8'}));const stream=info.streams[0];assert.equal(stream.codec_name,codec);assert.equal(stream.width,width);assert.equal(stream.height,height);assert.ok(Math.abs(Number(info.format.duration)-duration)<.15);if(codec==='gif'){assert.equal(fs.readFileSync(file).toString('ascii',0,6),'GIF89a');assert.equal(Number(stream.nb_read_frames),20);}results.push(name);console.log('PASS actual tool output:',name);
+  }
+  const frames=await page.evaluate(async()=>{const r=await window.qaV.extractVideoFrames(window.qaVideo,.5,'png',10);const count=r.frames.length,signature=Array.from(new Uint8Array(await r.frames[0].blob.arrayBuffer()).slice(0,8));r.frames.forEach(f=>URL.revokeObjectURL(f.url));return {count,signature,zip:r.zipBlob.size};});assert.ok(frames.count>=4&&frames.count<=5);assert.deepEqual(frames.signature,[137,80,78,71,13,10,26,10]);assert.ok(frames.zip>100);results.push('video frames PNG + ZIP');
+  await page.evaluate(async()=>{const c=document.createElement('canvas');c.width=80;c.height=60;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(0,0,80,60);window.qaImage=new File([await new Promise(r=>c.toBlob(r,'image/png'))],'source.png',{type:'image/png'});});
+  for(const [format,magic] of [['bmp','BM'],['png',null],['jpeg',null],['webp',null],['ico',null]]){
+   const result=await page.evaluate(async format=>{const r=await window.qaI.convertImage(window.qaImage,{format,width:32,height:32});return {data:Array.from(new Uint8Array(await r.blob.arrayBuffer())),width:r.width,height:r.height};},format);
+   const file=path.join(dir,'image.'+format);fs.writeFileSync(file,Buffer.from(result.data));if(magic)assert.equal(fs.readFileSync(file).toString('ascii',0,2),magic);
+   const probe=JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-of','json',file],{encoding:'utf8'}));assert.equal(probe.streams[0].width,32);assert.equal(probe.streams[0].height,32);results.push('image '+format);console.log('PASS actual image output:',format);
+  }
+  await check('visualizer.mp4',async()=>Array.from(new Uint8Array(await(await window.qaA.audioToVideo(window.qaAudio,window.qaImage,25)).blob.arrayBuffer())),i=>{assert.equal(i.streams[0].codec_name,'h264');assert.ok(i.streams.some(s=>s.codec_type==='audio'));assert.equal(i.streams[0].width,1280);assert.ok(Math.abs(Number(i.format.duration)-2)<.3);});
+  for(const options of [{sampleRate:8000,channels:1,bitrate:6},{sampleRate:48000,channels:2,bitrate:510}]){
+   const data=await page.evaluate(async options=>Array.from(new Uint8Array(await(await window.qaA.convertAudio(window.qaAudio,{format:'opus',...options,metadata:{title:'Codec regression'}})).blob.arrayBuffer())),options);
+   const file=path.join(dir,'boundary.opus');fs.writeFileSync(file,Buffer.from(data));const probe=JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-of','json',file],{encoding:'utf8'}));assert.equal(probe.streams[0].codec_name,'opus');assert.equal(probe.streams[0].channels,options.channels);assert.equal(Object.entries(probe.streams[0].tags||{}).find(([key])=>key.toLowerCase()==='title')?.[1],'Codec regression',JSON.stringify(probe.streams[0].tags));
+  }results.push('Opus low/high bitrate, channels, input sample rates and metadata');
+  const metadata=await page.evaluate(async()=>{const {inspectMediaFile}=await import('/src/services/mediaMetadata.ts');return inspectMediaFile(window.qaAudio);});assert.equal(metadata.sampleRate,44100);assert.equal(metadata.audioChannels,2);results.push('metadata reads original 44.1 kHz, not AudioContext rate');
+  const pdf=await page.evaluate(async()=>{const {convertImagesToPdf}=await import('/src/services/pdfProcessor.ts');const item={id:'1',file:window.qaImage,previewUrl:'',rotation:0};return Array.from(new Uint8Array(await(await convertImagesToPdf([item,{...item,id:'2',rotation:90}],{pageSize:'a4',orientation:'auto',marginMm:5,imageFit:'contain'})).arrayBuffer()));});
+  assert.equal(Buffer.from(pdf).toString('ascii',0,5),'%PDF-');assert.equal((Buffer.from(pdf).toString('latin1').match(/\/Type \/Page\b/g)||[]).length,2);results.push('two-page image PDF with rotation');
+  // Exercise the actual GIF component, not just its processing helper.
+  const search=page.locator('header input[type="text"]');await search.fill('Video to GIF');await page.getByRole('option',{name:/Video to GIF/}).click();
+  await page.getByRole('heading',{name:'Video to GIF Maker'}).waitFor();await page.locator('input[type="file"]').setInputFiles(video);
+  await page.waitForFunction(()=>document.querySelector('input[type="number"]')?.max!=='0');await page.getByRole('button',{name:'Create Animated GIF'}).click();
+  const button=page.getByRole('button',{name:'Download GIF'});await button.waitFor({timeout:120000});const [download]=await Promise.all([page.waitForEvent('download'),button.click()]);assert.equal(fs.readFileSync(await download.path()).toString('ascii',0,6),'GIF89a');
+  await page.locator('input[type="number"]').first().fill('0.5');assert.equal(await button.count(),0);assert.equal(await page.getByRole('button',{name:'Create Animated GIF'}).count(),1);results.push('GIF UI and stale result invalidation');
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({native:!!process.env.MEDIAFORGE_TEST_NATIVE,results,errors},null,2));
+ }finally{await browser?.close();server.kill();fs.rmSync(dir,{recursive:true,force:true});}
+})().catch(e=>{console.error(e);process.exitCode=1;});

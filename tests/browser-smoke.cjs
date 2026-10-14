@@ -14,11 +14,6 @@ const port=8790;
     const page=await browser.newPage({viewport:{width:1280,height:960},reducedMotion:'reduce'});
     const errors=[],checks=[];
     page.on('pageerror',e=>errors.push(e.message));
-    // Optional local copies of the SAME production WASM core; encoding remains real.
-    if(process.env.MEDIAFORGE_TEST_CORE)await page.route('https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/*',async route=>{
-      const file=path.basename(new URL(route.request().url()).pathname);
-      await route.fulfill({status:200,contentType:file.endsWith('.wasm')?'application/wasm':'text/javascript',headers:{'access-control-allow-origin':'*'},body:fs.readFileSync(path.join(process.env.MEDIAFORGE_TEST_CORE,file))});
-    });
     await page.goto(`http://127.0.0.1:${port}`);
     await page.getByRole('heading',{name:'Siapkan berkas'}).waitFor();
     assert.equal(await page.locator('.cv-stat').count(),4);
@@ -42,7 +37,7 @@ const port=8790;
     assert.equal(await page.locator('.cv-job').count(),0);
     assert.equal(await page.locator('.cv-history-panel tbody tr').count(),1);
     checks.push('Queue filter and cleanup work; completed history is retained.');
-    if(process.env.MEDIAFORGE_TEST_CORE){
+    {
       for(const [mode,format] of [['Audio → Audio','mp3'],['Audio → Video','mp4'],['Video → Video','webm'],['Video → Audio','wav']]){
         await page.getByRole('group',{name:'Mode konversi'}).getByRole('button',{name:new RegExp(mode)}).click();
         await page.getByRole('button',{name:'Contoh berkas',exact:true}).click();

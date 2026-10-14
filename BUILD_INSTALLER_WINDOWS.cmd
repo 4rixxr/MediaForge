@@ -14,15 +14,22 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo [1/3] Install locked dependencies...
+echo [1/4] Install locked dependencies...
 call npm ci --no-audit --no-fund
 if errorlevel 1 goto failed
 call npm run verify:electron
 if errorlevel 1 goto failed
-echo [2/3] Ambil binary Windows yt-dlp / FFmpeg...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\fetch-windows-tools.ps1"
+echo [2/4] Ambil binary Windows yt-dlp / FFmpeg...
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0scripts\fetch-windows-tools.ps1"
 if errorlevel 1 goto failed
-echo [3/3] Build, stage, dan kemasi installer...
+echo [3/4] Siapkan VCDImager, CDRDAO, dan uji optical tools...
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0scripts\fetch-vcdimager.ps1"
+if errorlevel 1 goto failed
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0scripts\fetch-cdrdao.ps1"
+if errorlevel 1 goto failed
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0scripts\test-optical-windows.ps1"
+if errorlevel 1 goto failed
+echo [4/4] Build, stage, dan kemasi installer...
 call npm run package:win
 if errorlevel 1 goto failed
 echo.

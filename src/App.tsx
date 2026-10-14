@@ -15,6 +15,7 @@ import { ToolId } from './types/media';
 
 // Tools Components
 const UrlDownloader = lazy(() => import('./components/tools/UrlDownloader').then(module => ({ default: module.UrlDownloader })));
+const Burner=lazy(()=>import('./components/tools/Burner').then(m=>({default:m.Burner})));
 const Dashboard = lazy(() => import('./components/tools/Dashboard').then(module => ({ default: module.Dashboard })));
 const VideoConverter = lazy(() => import('./components/tools/VideoConverter').then(module => ({ default: module.VideoConverter })));
 const VideoCompressor = lazy(() => import('./components/tools/VideoCompressor').then(module => ({ default: module.VideoCompressor })));
@@ -47,9 +48,12 @@ const HistoryView = lazy(() => import('./components/tools/HistoryView').then(mod
 const SettingsView = lazy(() => import('./components/tools/SettingsView').then(module => ({ default: module.SettingsView })));
 
 function AppContent() {
+  const [toolError,setToolError]=useState('');
+  useEffect(()=>{const receive=(event:Event)=>setToolError((event as CustomEvent<string>).detail);window.addEventListener('mediaforge:tool-error',receive);return()=>window.removeEventListener('mediaforge:tool-error',receive);},[]);
   const [currentTool, setCurrentTool] = useState<ToolId>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
+  useEffect(()=>setToolError(''),[currentTool]);
   // Global hotkeys (Cmd+K / Ctrl+K, Esc)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -65,6 +69,8 @@ function AppContent() {
 
   const renderCurrentTool = () => {
     switch (currentTool) {
+      case 'burner':
+        return <Burner />;
       case 'url-downloader':
         return <UrlDownloader />;
       case 'dashboard':
@@ -124,7 +130,7 @@ function AppContent() {
 
       // Tools
       case 'batch-converter':
-        return <Dashboard onSelectTool={setCurrentTool} />;
+        return <BatchConverter />;
       case 'media-info':
         return <MediaInfo />;
       case 'history':
@@ -158,6 +164,7 @@ function AppContent() {
 
         <main id="workspace" tabIndex={-1} className="studio-main flex-1 min-w-0 p-5 sm:p-8 lg:p-10">
           <div className="max-w-7xl mx-auto tool-workspace">
+            {toolError && <div role="alert" className="studio-error mb-4 break-words"><strong>Proses gagal: </strong>{toolError}<button type="button" onClick={()=>setToolError('')} className="ml-3 underline">Tutup</button></div>}
             <Suspense fallback={<div className="studio-notice" role="status">Loading tool…</div>}>{renderCurrentTool()}</Suspense>
           </div>
         </main>

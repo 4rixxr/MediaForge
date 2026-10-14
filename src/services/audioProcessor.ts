@@ -3,10 +3,13 @@
  * Powered by Web Audio API & OfflineAudioContext - 100% in-browser, privacy-first
  */
 
+import {conversionArgs} from '../../shared/conversion.js';
 import { ffmpegService } from './ffmpegService';
 
 export interface AudioConversionOptions {
-  format: 'wav' | 'mp3' | 'aac' | 'ogg' | 'opus' | 'flac' | 'm4a';
+  format: 'wav' | 'mp3' | 'aac' | 'ogg' | 'opus' | 'flac' | 'm4a' | 'wma';
+  quality?: number;
+  metadata?: Record<string,string>;
   bitrate?: number; // e.g. 128, 192, 320 kbps
   sampleRate?: number; // e.g. 44100, 48000
   channels?: 1 | 2; // mono or stereo
@@ -22,7 +25,7 @@ export function getAudioContext(): AudioContext {
     sharedAudioContext = new AudioCtx();
   }
   if (sharedAudioContext.state === 'suspended') {
-    sharedAudioContext.resume();
+    sharedAudioContext.resume().catch(()=>{});
   }
   return sharedAudioContext;
 }
@@ -33,7 +36,11 @@ export function getAudioContext(): AudioContext {
 export async function decodeAudioFile(file: File | Blob): Promise<AudioBuffer> {
   const ctx = getAudioContext();
   const arrayBuffer = await file.arrayBuffer();
-  return await ctx.decodeAudioData(arrayBuffer);
+  try { return await ctx.decodeAudioData(arrayBuffer); }
+  catch {
+    const wav=await ffmpegService.convertAudioWithFFmpeg(file instanceof File?file:new File([file],'audio-input'),'wav',{sampleRate:48000,channels:2});
+    return ctx.decodeAudioData(await wav.arrayBuffer());
+  }
 }
 
 /**
@@ -126,6 +133,7 @@ export async function convertAudio(
   options: AudioConversionOptions,
   onProgress?: (percent: number) => void
 ): Promise<{ blob: Blob; duration: number; originalSize: number; newSize: number; format: string }> {
+  conversionArgs('audio',options.format,options);
   if (options.normalize || (options.volume !== undefined && options.volume !== 1)) {
     const decoded = await decodeAudioFile(file);
     let gain = options.volume ?? 1;
@@ -137,7 +145,7 @@ export async function convertAudio(
       if (peak > 0) gain /= peak;
     }
     const pcm = audioBufferToWav(decoded, options.sampleRate, options.channels, gain);
-    if (options.format === 'wav') {
+    if (options.format === 'wav' && !Object.values(options.metadata||{}).some(Boolean)) {
       onProgress?.(100);
       return { blob: pcm, duration: decoded.duration, originalSize: file.size, newSize: pcm.size, format: 'wav' };
     }
@@ -145,7 +153,7 @@ export async function convertAudio(
     return { ...result, originalSize: file.size };
   }
   // PCM WAV can be encoded locally without downloading a WebAssembly engine.
-  if (options.format === 'wav') {
+  if (options.format === 'wav' && !Object.values(options.metadata||{}).some(Boolean)) {
     try {
       const decoded = await decodeAudioFile(file);
       const blob = audioBufferToWav(decoded, options.sampleRate, options.channels, options.volume ?? 1);
@@ -155,74 +163,9 @@ export async function convertAudio(
       // Containers unsupported by Web Audio may still be readable by FFmpeg.
     }
   }
-  // If file is a File object, attempt FFmpeg.wasm first
-  if (file instanceof File) {
-    try {
-      const ffmpegBlob = await ffmpegService.convertAudioWithFFmpeg(
-        file,
-        options.format,
-        {
-          bitrate: options.bitrate,
-          sampleRate: options.sampleRate,
-          channels: options.channels,
-        },
-        onProgress
-      );
-
-      return {
-        blob: ffmpegBlob,
-        duration: 0,
-        originalSize: file.size,
-        newSize: ffmpegBlob.size,
-        format: options.format,
-      };
-    } catch (ffmpegErr) {
-      console.log('Falling back to WebAudio WAV/MediaRecorder pipeline:', ffmpegErr);
-    }
-  }
-
-  onProgress?.(10);
-  const audioBuffer = await decodeAudioFile(file);
-  onProgress?.(45);
-
-  const duration = audioBuffer.duration;
-  let resultBlob: Blob;
-
-  if (options.format === 'wav') {
-    resultBlob = audioBufferToWav(audioBuffer, options.sampleRate, options.channels, options.volume ?? 1);
-  } else {
-    const mimeCandidates: Record<string, string[]> = {
-      ogg: ['audio/ogg;codecs=opus', 'audio/ogg'],
-      opus: ['audio/ogg;codecs=opus'],
-      m4a: ['audio/mp4'],
-    };
-    const selectedMime = typeof MediaRecorder !== 'undefined'
-      ? (mimeCandidates[options.format] || []).find((mime) => MediaRecorder.isTypeSupported(mime))
-      : undefined;
-    if (!selectedMime) {
-      throw new Error(`${options.format.toUpperCase()} encoding requires the FFmpeg engine, which could not load. Check your connection or choose WAV.`);
-    }
-    let recordingBuffer = audioBuffer;
-    if (options.sampleRate || options.channels) {
-      const rate = options.sampleRate || audioBuffer.sampleRate;
-      const offline = new OfflineAudioContext(options.channels || audioBuffer.numberOfChannels, Math.ceil(duration * rate), rate);
-      const source = offline.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(offline.destination);
-      source.start();
-      recordingBuffer = await offline.startRendering();
-    }
-    resultBlob = await encodeAudioViaMediaRecorder(recordingBuffer, selectedMime, options.bitrate || 192, options.volume ?? 1, onProgress);
-  }
-  onProgress?.(100);
-
-  return {
-    blob: resultBlob,
-    duration,
-    originalSize: file.size,
-    newSize: resultBlob.size,
-    format: options.format,
-  };
+  const input=file instanceof File?file:new File([file],'audio-input',{type:file.type});
+  const blob=await ffmpegService.convertAudioWithFFmpeg(input,options.format,{bitrate:options.bitrate,quality:options.quality,metadata:options.metadata,sampleRate:options.sampleRate,channels:options.channels},onProgress);
+  return {blob,duration:0,originalSize:file.size,newSize:blob.size,format:options.format};
 }
 
 /**
@@ -320,7 +263,7 @@ export async function audioToVideo(
   if (imageFile) {
     bgImg = new Image();
     bgImg.src = URL.createObjectURL(imageFile);
-    await new Promise((r) => (bgImg!.onload = r));
+    await new Promise<void>((resolve,reject)=>{bgImg!.onload=()=>resolve();bgImg!.onerror=()=>reject(Error('Gambar sampul tidak dapat dibaca.'));}).finally(()=>URL.revokeObjectURL(bgImg!.src));
   }
 
   // Draw background frame
@@ -398,21 +341,16 @@ export async function audioToVideo(
     if (e.data.size > 0) chunks.push(e.data);
   };
 
-  return new Promise((resolve, reject) => {
+  const recorded=await new Promise<Blob>((resolve, reject) => {
     let animId: number;
     let startTime = Date.now();
 
-    recorder.onstop = () => {
-      cancelAnimationFrame(animId);
-      source.stop();
-      resolve({
-        blob: new Blob(chunks, { type: mime }),
-        duration,
-      });
-    };
+    const cleanup=()=>{cancelAnimationFrame(animId);source.disconnect();analyser.disconnect();combinedStream.getTracks().forEach(track=>track.stop());};
+    recorder.onstop = () => {cleanup();resolve(new Blob(chunks,{type:mime}));};
+    source.onended=()=>{if(recorder.state!=='inactive')recorder.stop();};
 
     recorder.onerror = (e) => {
-      cancelAnimationFrame(animId);
+      source.stop();cleanup();
       reject(e);
     };
 
@@ -429,7 +367,7 @@ export async function audioToVideo(
       }
 
       if (elapsed >= duration) {
-        recorder.stop();
+        if(recorder.state!=='inactive')recorder.stop();
       } else {
         animId = requestAnimationFrame(renderLoop);
       }
@@ -437,54 +375,7 @@ export async function audioToVideo(
 
     renderLoop();
   });
+  const blob=await ffmpegService.convertVideoWithFFmpeg(new File([recorded],'visualizer.'+(mime.includes('mp4')?'mp4':'webm')),'mp4',{fps,bitrate:2500000},onProgress);
+  return {blob,duration};
 }
 
-async function encodeAudioViaMediaRecorder(
-  buffer: AudioBuffer,
-  mimeType: string,
-  bitrate: number,
-  volume: number,
-  onProgress?: (p: number) => void
-): Promise<Blob> {
-  const ctx = getAudioContext();
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
-
-  const gain = ctx.createGain();
-  gain.gain.value = volume;
-  source.connect(gain);
-
-  const dest = ctx.createMediaStreamDestination();
-  gain.connect(dest);
-
-  const recorder = new MediaRecorder(dest.stream, {
-    mimeType,
-    audioBitsPerSecond: bitrate * 1000,
-  });
-
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data.size > 0) chunks.push(e.data);
-  };
-
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      source.disconnect();
-      gain.disconnect();
-      dest.stream.getTracks().forEach((track) => track.stop());
-    };
-    recorder.onstop = () => {
-      cleanup();
-      resolve(new Blob(chunks, { type: mimeType }));
-    };
-    recorder.onerror = (error) => {
-      cleanup();
-      reject(error);
-    };
-    source.onended = () => {
-      if (recorder.state !== 'inactive') recorder.stop();
-    };
-    recorder.start(250);
-    source.start();
-  });
-}

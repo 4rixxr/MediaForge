@@ -1,3 +1,4 @@
+import {reportToolError} from '../../services/toolErrors';
 import React, { useState, useEffect } from 'react';
 import { Shrink, Download, RotateCw, CheckCircle2 } from 'lucide-react';
 import { DropZone } from '../common/DropZone';
@@ -15,6 +16,8 @@ export const ImageCompressor: React.FC = () => {
   const [isCompressing, setIsCompressing] = useState<boolean>(false);
   const { addHistoryItem } = useHistory();
 
+  useEffect(()=>()=>{if(originalUrl)URL.revokeObjectURL(originalUrl);},[originalUrl]);
+  useEffect(()=>()=>{if(compressedUrl)URL.revokeObjectURL(compressedUrl);},[compressedUrl]);
   const handleFile = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
@@ -27,8 +30,9 @@ export const ImageCompressor: React.FC = () => {
 
   // Re-compress when quality or format changes
   useEffect(() => {
+    setCompressedBlob(null);setCompressedUrl(null);
     if (!file) return;
-
+    setIsCompressing(true);
     let isMounted = true;
     const compress = async () => {
       setIsCompressing(true);
@@ -45,7 +49,7 @@ export const ImageCompressor: React.FC = () => {
           setIsCompressing(false);
         }
       } catch (e) {
-        console.error(e);
+        reportToolError(e);
         if (isMounted) setIsCompressing(false);
       }
     };
@@ -58,8 +62,8 @@ export const ImageCompressor: React.FC = () => {
   }, [file, quality, format]);
 
   const originalSize = file ? file.size : 0;
-  const compressedSize = compressedBlob ? compressedBlob.size : originalSize * (quality / 100) * 0.7;
-  const reductionPercent = Math.max(0, Math.round(((originalSize - compressedSize) / (originalSize || 1)) * 100));
+  const compressedSize = compressedBlob ? compressedBlob.size : 0;
+  const reductionPercent = Math.round(((originalSize - compressedSize) / (originalSize || 1)) * 100);
 
   const formatSize = (bytes: number) => {
     if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
@@ -128,11 +132,11 @@ export const ImageCompressor: React.FC = () => {
             </div>
             <div>
               <div className="text-[11px] text-slate-400 uppercase font-medium">Compressed Size</div>
-              <div className="mt-1 text-base font-bold text-indigo-600 dark:text-indigo-400">{formatSize(compressedSize)}</div>
+              <div className="mt-1 text-base font-bold text-indigo-600 dark:text-indigo-400">{compressedBlob?formatSize(compressedSize):'—'}</div>
             </div>
             <div>
               <div className="text-[11px] text-slate-400 uppercase font-medium">Savings</div>
-              <div className="mt-1 text-base font-bold text-emerald-500">-{reductionPercent}%</div>
+              <div className="mt-1 text-base font-bold text-emerald-500">{!compressedBlob?'—':reductionPercent>=0?`${reductionPercent}% lebih kecil`:`${-reductionPercent}% lebih besar`}</div>
             </div>
           </div>
 
