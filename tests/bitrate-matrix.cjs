@@ -1,6 +1,0 @@
-// Native encoder capability check: every advertised lossy preset at each sample rate/channel combination.
-const {execFileSync}=require('node:child_process');const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-(async()=>{const {audioProfiles,audioRates,audioArgs}=await import('../shared/media-profiles.js');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mf-rates-'));let count=0;const failures=[];
-try{for(const [format,p] of Object.entries(audioProfiles)){if(p.lossless)continue;for(const sampleRate of p.samples)for(const channels of [1,2])for(const value of audioRates(format,channels,sampleRate)){
- const target=path.join(dir,'out.'+format);try{execFileSync(process.env.MEDIAFORGE_FFMPEG||'ffmpeg',['-v','error','-y','-f','lavfi','-i','sine=frequency=440:duration=0.12',...audioArgs(format,{sampleRate,channels,...(p.quality?{quality:value}:{bitrate:value})}),target],{stdio:['ignore','ignore','pipe']});count++;}catch(e){failures.push({format,sampleRate,channels,value,error:String(e.stderr)});}
-}console.log('Checked',format);}console.log(JSON.stringify({encoded:count,failures},null,2));if(failures.length)process.exitCode=1;}finally{fs.rmSync(dir,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1});

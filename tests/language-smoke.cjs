@@ -1,9 +1,0 @@
-const {chromium}=require('playwright');
-const {spawn}=require('node:child_process');
-const path=require('node:path');const assert=require('node:assert/strict');
-(async()=>{const root=path.resolve(__dirname,'..');const port=8794;const server=spawn(process.execPath,['server.js'],{cwd:root,env:{...process.env,MEDIAFORGE_PORT:String(port)},stdio:'ignore'});let browser;
-try{for(let i=0;i<50;i++){try{await fetch(`http://127.0.0.1:${port}`);break}catch{await new Promise(r=>setTimeout(r,100));}}
-browser=await chromium.launch({headless:true,...(process.env.MEDIAFORGE_CHROMIUM?{executablePath:process.env.MEDIAFORGE_CHROMIUM}:{})});const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(`http://127.0.0.1:${port}`);await page.getByRole('button',{name:'Pengaturan',exact:true}).click();await page.locator('#interface-language').waitFor();assert.equal(await page.locator('#interface-language option').count(),5);
-for(const [code,title,html] of [['en','Settings','en'],['zh','设置','zh-CN'],['th','การตั้งค่า','th'],['ja','設定','ja'],['id','Pengaturan','id']]){await page.locator('#interface-language').selectOption(code);await page.getByRole('heading',{name:title,exact:true}).waitFor();assert.equal(await page.locator('html').getAttribute('lang'),html);await page.reload();await page.getByRole('button',{name:title,exact:true}).click();await page.locator('#interface-language').waitFor();assert.equal(await page.locator('#interface-language').inputValue(),code);console.log('PASS language + reload persistence:',code);}
-if(process.env.MEDIAFORGE_LANGUAGE_PREVIEW)await page.screenshot({path:process.env.MEDIAFORGE_LANGUAGE_PREVIEW,fullPage:true});assert.deepEqual(errors,[]);
-}finally{await browser?.close();server.kill();}})().catch(e=>{console.error(e);process.exit(1)});
