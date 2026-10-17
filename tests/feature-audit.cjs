@@ -1,0 +1,44 @@
+// QA only: real Chromium UI + native FFmpeg. No external URLs or physical discs.
+const {chromium}=require('playwright');
+const {spawn,execFileSync}=require('node:child_process');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..'),port=8798;
+(async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mf-audit-'));let browser;
+ const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port',String(port)],{cwd:root,stdio:'ignore'});
+ try{
+  const wav=path.join(dir,'source.wav'),video=path.join(dir,'source.webm');
+  execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=500:duration=1','-ar','44100','-ac','2',wav]);
+  execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','testsrc2=s=320x240:r=25:d=1','-i',wav,'-c:v','libvpx','-c:a','libvorbis','-shortest',video]);
+  for(let n=0;n<50;n++){try{await fetch(`http://127.0.0.1:${port}`);break;}catch{await new Promise(r=>setTimeout(r,100));}}
+  browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required'],...(process.env.MEDIAFORGE_CHROMIUM?{executablePath:process.env.MEDIAFORGE_CHROMIUM}:{})});
+  const page=await browser.newPage({viewport:{width:1280,height:960}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const {convertMedia}=require('../desktop/media.cjs');
+  await page.exposeFunction('__native',async r=>{await new Promise(resolve=>setTimeout(resolve,120));const o=await convertMedia({...r,bytes:Uint8Array.from(r.bytes)},{ffmpeg:'ffmpeg',ffprobe:'ffprobe'});return {...o,bytes:Array.from(o.bytes)};});
+  await page.addInitScript(()=>{window.mediaforgeMedia={subscribe:()=>()=>{},convert:async(_id,r)=>{const o=await window.__native({...r,bytes:Array.from(new Uint8Array(r.bytes))});return {...o,bytes:Uint8Array.from(o.bytes)};}};});
+  await page.goto(`http://127.0.0.1:${port}`);await page.getByRole('heading',{name:'Siapkan berkas'}).waitFor();
+  const tools=await page.evaluate(async()=> (await import('/src/constants/tools.ts')).TOOLS_LIST);
+  async function route(id){const tool=tools.find(t=>t.id===id);await page.getByRole('combobox',{name:'Search media tools'}).fill(tool.name);await page.locator('#mf-result-'+id).click();await page.locator('main h1, main h2').first().waitFor();await page.getByText('Loading tool…',{exact:true}).waitFor({state:'hidden'});}
+  for(const tool of tools){await route(tool.id);assert.ok((await page.locator('main').innerText()).trim().length>30);await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Overflow: '+tool.id);await page.setViewportSize({width:1280,height:960});console.log('PASS route + mobile layout:',tool.id);}
+  await route('video-resizer');await page.locator('input[type=file]').setInputFiles(video);await page.getByText('Original: 320 × 240 px',{exact:false}).waitFor();await page.getByRole('button',{name:'720p',exact:true}).click();
+  assert.deepEqual(await page.locator('input[type=number]').evaluateAll(es=>es.map(e=>e.value)),['960','720']);
+  await page.getByLabel('Maintain original aspect ratio').uncheck();await page.getByRole('button',{name:'720p',exact:true}).click();assert.deepEqual(await page.locator('input[type=number]').evaluateAll(es=>es.map(e=>e.value)),['1280','720']);console.log('PASS resizer: aspect-preserving versus explicit stretch');
+  await route('video-converter');await page.locator('input[type=file]').setInputFiles(video);await page.getByRole('button',{name:'Convert Now',exact:true}).waitFor();await page.getByRole('button',{name:'Convert Now',exact:true}).click();assert.equal(await page.getByRole('button',{name:'WEBM',exact:true}).isDisabled(),true);
+  const downloaded=page.getByRole('button',{name:/^Download \(/});await downloaded.waitFor({timeout:60000});
+  const [download]=await Promise.all([page.waitForEvent('download'),downloaded.click()]);const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-of','json',await download.path()],{encoding:'utf8'}));assert.equal(probe.streams[0].codec_name,'h264');
+  await page.getByRole('button',{name:'WEBM',exact:true}).click();await page.getByRole('button',{name:'Convert Now',exact:true}).waitFor();assert.equal(await downloaded.count(),0);console.log('PASS Video Converter: native output, locked controls and invalidated old output');
+  await route('audio-compressor');await page.locator('input[type=file]').setInputFiles(wav);
+  await page.getByRole('button',{name:/Compress Audio/}).click();await page.getByRole('button',{name:/Download/}).waitFor({timeout:60000});
+  await page.getByRole('button',{name:/Maximum Compression/i}).click();assert.equal(await page.getByRole('button',{name:/Download/}).count(),0);console.log('PASS Audio Compressor: changed preset invalidates old output');
+  await route('batch-converter');await page.locator('input[type=file]').setInputFiles({name:'source.AIF',mimeType:'',buffer:fs.readFileSync(wav)});assert.equal(await page.locator('main select').first().inputValue(),'MP3');assert.ok((await page.locator('main').innerText()).includes('audio'));
+  await page.getByRole('button',{name:'Convert',exact:true}).click();const zipButton=page.getByRole('button',{name:/Download All as ZIP/});await zipButton.waitFor({timeout:60000});const [zipDownload]=await Promise.all([page.waitForEvent('download'),zipButton.click()]);assert.equal(fs.readFileSync(await zipDownload.path()).toString('ascii',0,2),'PK');assert.match(zipDownload.suggestedFilename(),/\.zip$/);console.log('PASS single completed batch file still downloads as ZIP');
+  await page.getByRole('button',{name:'Clear All Queue'}).click();await page.locator('input[type=file]').setInputFiles({name:'source.WMV',mimeType:'',buffer:fs.readFileSync(video)});assert.equal(await page.locator('main select').first().inputValue(),'MP4');console.log('PASS empty MIME .AIF/.WMV batch classification');
+  const image=await page.evaluate(async()=>{const c=document.createElement('canvas');c.width=80;c.height=60;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(0,0,80,60);const f=new File([await new Promise(r=>c.toBlob(r,'image/png'))],'image.png',{type:'image/png'});window.qaImage=f;return Array.from(new Uint8Array(await f.arrayBuffer()));});
+  await page.getByRole('button',{name:'Clear All Queue'}).click();await page.locator('input[type=file]').setInputFiles({name:'image.png',mimeType:'image/png',buffer:Buffer.from(image)});assert.equal(await page.locator('main option[value=AVIF]').count(),0);console.log('PASS unsupported AVIF is not offered in batch');
+  const crop=await page.evaluate(async()=>{const {cropImage}=await import('/src/services/imageProcessor.ts');const b=await cropImage(window.qaImage,{x:10,y:5,width:20,height:30});const img=await createImageBitmap(b);return {width:img.width,height:img.height};});assert.deepEqual(crop,{width:20,height:30});
+  const pdf=await page.evaluate(async()=>{const {convertImagesToPdf}=await import('/src/services/pdfProcessor.ts');const item={id:'1',file:window.qaImage,previewUrl:'',rotation:0};const b=await convertImagesToPdf([item],{pageSize:'a4',orientation:'p',marginMm:5,imageFit:'cover'});let rejected=false;try{await convertImagesToPdf([item],{pageSize:'original',orientation:'auto',marginMm:50,imageFit:'contain'});}catch{rejected=true;}return {data:Array.from(new Uint8Array(await b.arrayBuffer())),rejected};});assert.equal(pdf.rejected,true);const pdfText=Buffer.from(pdf.data).toString('latin1');assert.match(pdfText,/W\s+n/);const transform=pdfText.match(/([\d.]+) 0 0 ([\d.]+) [-\d.]+ [-\d.]+ cm/);assert.ok(transform);assert.ok(Math.abs(Number(transform[1])/Number(transform[2])-4/3)<.0001);console.log('PASS image crop, PDF cover retains ratio + clips, oversized margin rejected');
+  await route('image-resizer');await page.locator('input[type=file]').setInputFiles({name:'image.png',mimeType:'image/png',buffer:Buffer.from(image)});await page.getByRole('button',{name:'200%',exact:true}).waitFor();await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.setViewportSize({width:1280,height:960});console.log('PASS loaded image resizer wraps presets on mobile');
+  await route('media-info');await page.locator('input[type=file]').setInputFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('hello')});await page.getByText('General File Info',{exact:true}).waitFor();console.log('PASS document inspector shows basic information');
+  assert.deepEqual(errors,[]);console.log('PASS all feature audit checks; no uncaught browser errors');
+ }finally{await browser?.close();server.kill();fs.rmSync(dir,{recursive:true,force:true});}
+})().catch(e=>{console.error(e);process.exitCode=1;});

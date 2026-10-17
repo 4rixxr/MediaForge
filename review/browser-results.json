@@ -1,0 +1,14 @@
+{
+  "browser": "133.0.6943.0",
+  "checks": [
+    "Reference layout: four stats, four modes, split workspace, queue, history.",
+    "Actual WAV conversion/download: RIFF header and selected mono channel verified.",
+    "Queue filter and cleanup work; completed history is retained.",
+    "Real Audio → Audio conversion and MP3 output signature verified.",
+    "Real Audio → Video conversion and MP4 output signature verified.",
+    "Real Video → Video conversion and WEBM output signature verified.",
+    "Real Video → Audio conversion and WAV output signature verified.",
+    "Dark theme and mobile layout/navigation checked without horizontal overflow."
+  ],
+  "errors": []
+}
